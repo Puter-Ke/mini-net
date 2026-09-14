@@ -19,7 +19,16 @@ grep -E "warning:" /tmp/build.log | head -5 || true
 
 echo
 echo "=============== 2/5 单元/集成测试 ==============="
-timeout 240 ctest --test-dir build --timeout 30 --output-on-failure 2>&1 | tail -8
+timeout 300 ctest --test-dir build --timeout 30 --output-on-failure > /tmp/ctest.log 2>&1
+CTEST_RC=$?
+echo "ctest 返回码: $CTEST_RC"
+grep -E "^ *[0-9]+/[0-9]+ Test" /tmp/ctest.log | tail -3
+if [ "$CTEST_RC" != "0" ]; then
+  echo "--- 失败的测试 ---"
+  grep -A3 "The following tests FAILED" /tmp/ctest.log
+  echo "--- 断言详情 ---"
+  grep -E "Failure|Expected|Which is|Actual|Value of|error:|Segmentation" /tmp/ctest.log | head -25
+fi
 
 echo
 echo "=============== 3/5 冒烟测试（1000 并发 + fd 泄漏）==============="
