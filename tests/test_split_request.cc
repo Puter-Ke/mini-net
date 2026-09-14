@@ -12,6 +12,7 @@
 
 #include "mini_net/EventLoop.h"
 #include "mini_net/HttpServer.h"
+#include "mini_net/Logger.h"
 #include "mini_net/ShortUrlApp.h"
 
 using namespace mininet;
@@ -87,6 +88,7 @@ protected:
         server_->setHandler([](const HttpRequest& q, HttpResponse* s) { app_->handle(q, s); });
         server_->setThreadNum(4);   // 故意多线程：连接会落在不同 IO 线程
         server_->setIdleTimeoutSeconds(0);
+        setLogLevel(LogLevel::Debug);   // 出问题时能看到服务端把请求解析成了什么
         server_->start();
         thread_ = new std::thread([] { loop_->loop(); });
         std::this_thread::sleep_for(std::chrono::milliseconds(300));
@@ -124,6 +126,10 @@ TEST_F(SplitRequestTest, RequestSplitIntoThreeChunks) {
         }
         const std::string resp = readResponse(fd);
         ::close(fd);
+        if (statusOf(resp) != 201) {
+            std::printf("SPLIT-DEBUG 第 %d 轮 status=%d 原始响应=[%s]\n", round, statusOf(resp),
+                        resp.substr(0, 200).c_str());
+        }
         EXPECT_EQ(statusOf(resp), 201) << "第 " << round << " 轮拆包失败，响应："
                                        << resp.substr(0, 120);
     }

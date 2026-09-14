@@ -29,6 +29,10 @@ if [ "$CTEST_RC" != "0" ]; then
   grep -A8 "The following tests FAILED" /tmp/ctest.log
   echo "--- 断言详情 ---"
   grep -E "Failure|Expected|Which is|Value of|actual" /tmp/ctest.log | head -20
+  echo "--- SPLIT-DEBUG（客户端看到的原始响应）---"
+  grep -E "SPLIT-DEBUG" /tmp/ctest.log | head -20
+  echo "--- 服务端解析到的请求（前 40 条）---"
+  grep -E "收到请求" /tmp/ctest.log | head -40
 fi
 
 echo

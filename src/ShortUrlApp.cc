@@ -154,6 +154,7 @@ void notFound(HttpResponse* resp) {
 
 void ShortUrlApp::handle(const HttpRequest& req, HttpResponse* resp) {
     const std::string& path = req.path;
+    LOG_DEBUG("收到请求 %s %s (body=%zu 字节)", req.method.c_str(), req.target.c_str(), req.body.size());
 
     if (path == "/healthz") {
         if (req.method != "GET") {
