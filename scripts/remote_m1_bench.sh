@@ -35,5 +35,21 @@ echo
 python3 scripts/bench_quick.py --conns 500 --requests 100 --size 64  --label "500-conns-64B"
 
 kill "$SERVER_PID" 2>/dev/null
+
+echo
+echo "=============== 5/5 空闲连接超时验证（服务端设 2 秒超时）==============="
+./build/mini_net_server 8081 2 > /tmp/server_idle.log 2>&1 &
+IDLE_PID=$!
+sleep 1
+# 连上但一个字节都不发，模拟"僵尸连接"
+for i in 1 2 3; do timeout 6 bash -c 'exec 3<>/dev/tcp/127.0.0.1/8081; sleep 5' >/dev/null 2>&1 & done
+sleep 5
+echo "服务端日志里的空闲清理记录："
+grep -E "空闲超时|本轮清理" /tmp/server_idle.log | head -6 || echo "  （没找到清理记录 —— 说明 M2 没生效）"
+echo "清理后在线连接数："
+grep -oE "在线 [0-9]+" /tmp/server_idle.log | tail -1
+kill "$IDLE_PID" 2>/dev/null
+
 echo
 echo "=============== 完成 ==============="
+
