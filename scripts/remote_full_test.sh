@@ -20,9 +20,16 @@ echo "压测客户端路径：${BENCH_BIN:-未找到}"
 
 echo
 echo "================ 2/6 单元/集成测试 ================"
-timeout 300 ctest --test-dir build --timeout 30 > /tmp/ctest.log 2>&1
-echo "ctest 返回码: $?"
+timeout 300 ctest --test-dir build --timeout 30 --output-on-failure > /tmp/ctest.log 2>&1
+CTEST_RC=$?
+echo "ctest 返回码: $CTEST_RC"
 grep -E "tests passed|Total Test time" /tmp/ctest.log | tail -2
+if [ "$CTEST_RC" != "0" ]; then
+  echo "--- 失败的测试 ---"
+  grep -A8 "The following tests FAILED" /tmp/ctest.log
+  echo "--- 断言详情 ---"
+  grep -E "Failure|Expected|Which is|Value of|actual" /tmp/ctest.log | head -20
+fi
 
 echo
 echo "================ 3/6 接口自动化测试（pytest）================"

@@ -202,7 +202,65 @@ TEST_F(SplitRequestTest, ConcurrentSameUrlIsIdempotent) {
     }
 }
 
-// 中文 URL 的 JSON 转义必须被正确还原（\\u4e2d 这类）
+// 精确复现 pytest 里报 404 的调用方式：**同一条 keep-alive 连接**上的多次顺序请求，
+// 每次都要先读完上一条的响应再发下一条（requests 的 Session 就是这么用的）
+TEST_F(SplitRequestTest, SequentialRequestsOnKeepAliveConnection) {
+    const int fd = dialWithTimeout();
+    ASSERT_GE(fd, 0);
+    for (int i = 0; i < 5; ++i) {
+        const std::string url = "https://example.com/seq/" + std::to_string(i);
+        const std::string req = shortenRequest(url, true);
+        ASSERT_EQ(::send(fd, req.data(), req.size(), 0), static_cast<ssize_t>(req.size()));
+        const std::string resp = readResponse(fd);
+        ASSERT_EQ(statusOf(resp), 201) << "第 " << i + 1 << " 次顺序请求失败：" << resp.substr(0, 150);
+        EXPECT_NE(resp.find(url), std::string::npos) << "第 " << i + 1 << " 次响应串台：" << resp.substr(0, 150);
+    }
+    ::close(fd);
+}
+
+// 模拟一个 Session 的混合调用：创建 → 跳转 → 统计 → 再创建，全在一条连接上
+TEST_F(SplitRequestTest, MixedOperationsOnOneKeepAliveConnection) {
+    const int fd = dialWithTimeout();
+    ASSERT_GE(fd, 0);
+
+    const std::string json = "{\"url\":\"https://example.com/mixed\"}";
+    std::string req = "POST /api/shorten HTTP/1.1\r\nHost: t\r\nContent-Length: " +
+                      std::to_string(json.size()) + "\r\nConnection: keep-alive\r\n\r\n" + json;
+    ASSERT_EQ(::send(fd, req.data(), req.size(), 0), static_cast<ssize_t>(req.size()));
+    const std::string r1 = readResponse(fd);
+    ASSERT_EQ(statusOf(r1), 201) << r1.substr(0, 150);
+    const size_t p = r1.find("\"code\":\"");
+    ASSERT_NE(p, std::string::npos);
+    const size_t begin = p + 8;
+    const std::string code = r1.substr(begin, r1.find('"', begin) - begin);
+    ASSERT_FALSE(code.empty());
+
+    // 跳转
+    const std::string r2req = "GET /" + code + " HTTP/1.1\r\nHost: t\r\nConnection: keep-alive\r\n\r\n";
+    ASSERT_EQ(::send(fd, r2req.data(), r2req.size(), 0), static_cast<ssize_t>(r2req.size()));
+    const std::string r2 = readResponse(fd);
+    EXPECT_EQ(statusOf(r2), 302) << r2.substr(0, 150);
+
+    // 统计
+    const std::string r3req =
+        "GET /api/stats/" + code + " HTTP/1.1\r\nHost: t\r\nConnection: keep-alive\r\n\r\n";
+    ASSERT_EQ(::send(fd, r3req.data(), r3req.size(), 0), static_cast<ssize_t>(r3req.size()));
+    const std::string r3 = readResponse(fd);
+    EXPECT_EQ(statusOf(r3), 200) << r3.substr(0, 150);
+    EXPECT_NE(r3.find("\"hits\":1"), std::string::npos) << r3.substr(0, 150);
+
+    // 再创建一条，验证连接还能继续用
+    const std::string json2 = "{\"url\":\"https://example.com/mixed-2\"}";
+    std::string req2 = "POST /api/shorten HTTP/1.1\r\nHost: t\r\nContent-Length: " +
+                       std::to_string(json2.size()) + "\r\nConnection: keep-alive\r\n\r\n" + json2;
+    ASSERT_EQ(::send(fd, req2.data(), req2.size(), 0), static_cast<ssize_t>(req2.size()));
+    const std::string r4 = readResponse(fd);
+    EXPECT_EQ(statusOf(r4), 201) << r4.substr(0, 150);
+
+    ::close(fd);
+}
+
+// 中文 URL 的 JSON 转义必须被正确还原（\u4e2d 这类）
 TEST_F(SplitRequestTest, UnicodeEscapedUrlIsDecoded) {
     const int fd = dialWithTimeout();
     ASSERT_GE(fd, 0);
