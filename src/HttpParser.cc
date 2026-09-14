@@ -22,31 +22,28 @@ std::string HttpParser::trim(const std::string& s) {
 
 void HttpParser::reset() {
     state_ = State::RequestLine;
+    req_ = HttpRequest{};      // 关键：连请求对象一起清空
     content_length_ = 0;
     header_bytes_ = 0;
 }
 
-HttpParser::Result HttpParser::parse(Buffer* buf, HttpRequest* req, Error* err) {
+HttpParser::Result HttpParser::parse(Buffer* buf, Error* err) {
     while (true) {
         switch (state_) {
             case State::RequestLine: {
-                const Result r = parseRequestLine(buf, req, err);
+                const Result r = parseRequestLine(buf, err);
                 if (r != Result::Complete) return r;
                 state_ = State::Headers;
                 break;
             }
             case State::Headers: {
-                const Result r = parseHeaders(buf, req, err);
+                const Result r = parseHeaders(buf, err);
                 if (r != Result::Complete) return r;
-                if (content_length_ == 0) {
-                    state_ = State::Done;
-                } else {
-                    state_ = State::Body;
-                }
+                state_ = (content_length_ == 0) ? State::Done : State::Body;
                 break;
             }
             case State::Body: {
-                const Result r = parseBody(buf, req, err);
+                const Result r = parseBody(buf, err);
                 if (r != Result::Complete) return r;
                 state_ = State::Done;
                 break;
@@ -57,7 +54,7 @@ HttpParser::Result HttpParser::parse(Buffer* buf, HttpRequest* req, Error* err) 
     }
 }
 
-HttpParser::Result HttpParser::parseRequestLine(Buffer* buf, HttpRequest* req, Error* err) {
+HttpParser::Result HttpParser::parseRequestLine(Buffer* buf, Error* err) {
     const char* eol = buf->findEOL();
     if (eol == nullptr) {
         header_bytes_ = buf->readableBytes();
@@ -74,17 +71,14 @@ HttpParser::Result HttpParser::parseRequestLine(Buffer* buf, HttpRequest* req, E
     buf->retrieveUntil(eol + 1);
     header_bytes_ += line.size() + 1;
 
-    if (line.empty() || line.find('\r') == std::string::npos) {
-        // 裸 \n 结尾：宽容处理，但纯空行是非法请求
-        if (line.empty()) {
-            err->status = 400;
-            err->code = "bad_request";
-            err->detail = "请求行为空";
-            return Result::Error;
-        }
+    const std::string clean = trim(line);
+    if (clean.empty()) {
+        err->status = 400;
+        err->code = "bad_request";
+        err->detail = "请求行为空";
+        return Result::Error;
     }
 
-    const std::string clean = trim(line);
     std::istringstream iss(clean);
     std::string method;
     std::string target;
@@ -95,8 +89,6 @@ HttpParser::Result HttpParser::parseRequestLine(Buffer* buf, HttpRequest* req, E
         err->detail = "请求行格式非法（应为 METHOD TARGET VERSION）";
         return Result::Error;
     }
-
-    // 版本校验：只支持 HTTP/1.0 和 HTTP/1.1
     if (version.rfind("HTTP/", 0) != 0) {
         err->status = 400;
         err->code = "bad_request";
@@ -111,22 +103,21 @@ HttpParser::Result HttpParser::parseRequestLine(Buffer* buf, HttpRequest* req, E
         return Result::Error;
     }
 
-    req->method = method;
-    req->target = target;
-    req->version = version;
+    req_.method = method;
+    req_.target = target;
+    req_.version = version;
     const size_t q = target.find('?');
     if (q == std::string::npos) {
-        req->path = target;
+        req_.path = target;
     } else {
-        req->path = target.substr(0, q);
-        req->query = target.substr(q + 1);
+        req_.path = target.substr(0, q);
+        req_.query = target.substr(q + 1);
     }
-    // 默认是否长连接：HTTP/1.1 默认 keep-alive，HTTP/1.0 默认关闭
-    req->keep_alive = (version == "HTTP/1.1");
+    req_.keep_alive = (version == "HTTP/1.1");
     return Result::Complete;
 }
 
-HttpParser::Result HttpParser::parseHeaders(Buffer* buf, HttpRequest* req, Error* err) {
+HttpParser::Result HttpParser::parseHeaders(Buffer* buf, Error* err) {
     while (true) {
         const char* eol = buf->findEOL();
         if (eol == nullptr) {
@@ -154,16 +145,14 @@ HttpParser::Result HttpParser::parseHeaders(Buffer* buf, HttpRequest* req, Error
         const std::string line = trim(raw);
         if (line.empty()) {
             // 空行 = 请求头结束
-            if (req->hasHeader("transfer-encoding")) {
-                const std::string* te = req->findHeader("transfer-encoding");
-                if (te != nullptr && lower(*te).find("chunked") != std::string::npos) {
-                    err->status = 501;
-                    err->code = "unsupported_transfer_encoding";
-                    err->detail = "v1 暂不支持 chunked 请求体";
-                    return Result::Error;
-                }
+            const std::string* te = req_.findHeader("transfer-encoding");
+            if (te != nullptr && lower(*te).find("chunked") != std::string::npos) {
+                err->status = 501;
+                err->code = "unsupported_transfer_encoding";
+                err->detail = "v1 暂不支持 chunked 请求体";
+                return Result::Error;
             }
-            const std::string* cl = req->findHeader("content-length");
+            const std::string* cl = req_.findHeader("content-length");
             if (cl != nullptr) {
                 char* endp = nullptr;
                 const long v = std::strtol(cl->c_str(), &endp, 10);
@@ -181,13 +170,13 @@ HttpParser::Result HttpParser::parseHeaders(Buffer* buf, HttpRequest* req, Error
                 }
                 content_length_ = static_cast<size_t>(v);
             }
-            const std::string* conn = req->findHeader("connection");
+            const std::string* conn = req_.findHeader("connection");
             if (conn != nullptr) {
                 const std::string c = lower(trim(*conn));
                 if (c == "close") {
-                    req->keep_alive = false;
+                    req_.keep_alive = false;
                 } else if (c == "keep-alive") {
-                    req->keep_alive = true;
+                    req_.keep_alive = true;
                 }
             }
             return Result::Complete;
@@ -200,14 +189,14 @@ HttpParser::Result HttpParser::parseHeaders(Buffer* buf, HttpRequest* req, Error
             err->detail = "请求头缺少冒号";
             return Result::Error;
         }
-        req->headers.emplace_back(lower(trim(line.substr(0, colon))), trim(line.substr(colon + 1)));
+        req_.headers.emplace_back(lower(trim(line.substr(0, colon))), trim(line.substr(colon + 1)));
     }
 }
 
-HttpParser::Result HttpParser::parseBody(Buffer* buf, HttpRequest* req, Error* err) {
+HttpParser::Result HttpParser::parseBody(Buffer* buf, Error* err) {
     (void)err;
     if (buf->readableBytes() < content_length_) return Result::NeedMore;
-    req->body = buf->retrieveAsString(content_length_);
+    req_.body = buf->retrieveAsString(content_length_);
     return Result::Complete;
 }
 

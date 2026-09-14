@@ -62,9 +62,10 @@ void HttpServer::onMessage(int fd, uint64_t conn_id, const char* data, size_t le
     conn->in.append(data, len);
 
     while (true) {
-        HttpRequest req;
         HttpParser::Error err;
-        const HttpParser::Result r = conn->parser.parse(&conn->in, &req, &err);
+        // 注意：请求对象由解析器持有（增量解析跨多次 read 累积），这里绝不能新建 HttpRequest 再传进去，
+        // 否则请求行在第 1 次 read 解析出来、却被后续 read 丢进一个新对象里（本项目踩过的 404 bug）
+        const HttpParser::Result r = conn->parser.parse(&conn->in, &err);
 
         if (r == HttpParser::Result::NeedMore) return;
         if (r == HttpParser::Result::Error) {
@@ -72,6 +73,7 @@ void HttpServer::onMessage(int fd, uint64_t conn_id, const char* data, size_t le
             return;
         }
 
+        const HttpRequest& req = conn->parser.request();
         requests_.fetch_add(1);
         HttpResponse resp;
         resp.keep_alive = req.keep_alive;
@@ -88,7 +90,7 @@ void HttpServer::onMessage(int fd, uint64_t conn_id, const char* data, size_t le
             server_->shutdown(fd);
             return;
         }
-        conn->parser.reset();
+        conn->parser.reset();   // 内部会把请求对象也清空，准备解析下一个请求
     }
 }
 
