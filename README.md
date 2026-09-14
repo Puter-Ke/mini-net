@@ -1,50 +1,89 @@
-# mini-net — 从零手写的 C++ 高并发网络服务
+# mini-net
 
 [![CI](https://github.com/Puter-Ke/mini-net/actions/workflows/ci.yml/badge.svg)](https://github.com/Puter-Ke/mini-net/actions/workflows/ci.yml)
 
-> 当前进度：**M1 完成并通过 1000 并发验证**（QPS 29k / fd 零泄漏 / ASAN 干净）
+**从零手写的 C++17 高并发网络服务**：不依赖任何第三方网络/HTTP 框架，
+自己实现 Reactor + epoll(ET) + one-loop-per-thread + 环形缓冲 + 定长对象池，
+并在其上实现 HTTP/1.1 解析与短链服务（创建 / 302 跳转 / 统计 / metrics）。
 
-> 目标：不依赖任何第三方网络框架，用 C++17 + epoll 实现一个支持 10k 并发连接的服务端，
-> 并配齐单测、CI、压测报告。这是给大厂 C++ 岗（华为 2012/ICT/海思 等）面试准备的主项目。
+> 面向的岗位：华为等大厂的 C++ 后端 / 软件开发 / 测试开发。
+> 仓库里同时保留了完整的**踩坑记录**与**面试问答**（docs/面试准备.md）。
 
-## 为什么做这个
-- 华为 JD：「掌握常用的软件架构模式、基本的编程编译工具」——只有亲手写过 Reactor / 内存池 / 线程池，
-  才能在面试里回答"为什么这么设计、代价是什么"。
-- 面试必问：epoll 边缘触发 vs 水平触发、惊群、粘包拆包、内存池为什么不直接用 malloc、
-  锁的粒度、time_wait、TCP_NODELAY …… 每一个你都应该能给出自己踩过的坑。
+## 已完成（都有真实测试数据）
 
-## 里程碑（详细到周见 docs/WEEKLY_PLAN.md）
-- [x] M1 单线程 Reactor + epoll 回显服务器（1000 并发、fd 零泄漏、QPS 29k ✅）
-- [x] M2 周期定时器 + 日志 + 空闲连接自动踢掉（含集成测试 ✅）
-- [ ] M3 one-loop-per-thread 多线程 + 线程池（QPS 提升 ≥2x）
-- [ ] M4 环形缓冲 Buffer + 内存池（perf 火焰图 malloc/free <5%）
-- [ ] M5 HTTP/1.1 解析 + 短链业务接口
-- [ ] M6 压测与优化（产出 QPS / P99 对比报告 + 火焰图）
-- [ ] M7 自动化测试套件（单测覆盖率 ≥70% + pytest 接口/性能/混沌用例 + CI 全绿）
-- [ ] M8 架构文档 + 中英双语 README + 简历三条量化描述
+| 模块 | 内容 | 验证方式 |
+|---|---|---|
+| M1 | Reactor + epoll(ET) + 非阻塞 fd + EINTR/SIGPIPE 处理 | 1000 并发连接、fd 零泄漏、ASAN 干净 |
+| M2 | 周期定时器 + 日志 + 空闲连接自动清理 | 集成测试 + 端到端日志证据 |
+| M3 | one loop per thread + IO 线程池 + eventfd 跨线程唤醒 | 多线程回显测试、跨线程任务延迟 < 200ms 断言 |
+| M4 | 环形缓冲（readv + 空间复用）+ 定长对象池 | 单测覆盖扩容/复用/半包；对象池实测结论 |
+| M5 | HTTP/1.1 增量解析 + 短链业务 + 路由 | 38 个 gtest 用例 + 冒烟全链路 |
+| M6 | 自写 C++ 压测客户端 + 对照实验 | bench/echo_bench，结果见 docs/RESULTS.md |
+| M7 | pytest 接口测试 + Locust + 混沌测试 | CI 中执行 |
+| M8 | 架构文档、双语 README、面试准备 | 本文件 + docs/ |
 
-## 环境（WSL2 Ubuntu，一条命令装完）
-```bash
-wsl --install -d Ubuntu          # Windows 侧执行一次，需要重启
-# 进入 Ubuntu 后：
-bash scripts/env-setup.sh
-```
+## 快速开始（Linux / WSL / Codespaces）
 
-## 构建 / 运行 / 测试
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
-./build/mini_net_server 8080            # 启动服务
-ctest --test-dir build --output-on-failure
-cmake -B build-asan -DENABLE_ASAN=ON && cmake --build build-asan -j   # 内存检查
+./build/mini_net_server 8080 30 4      # 端口 空闲超时(秒) IO线程数
+```
+
+```bash
+curl -i http://127.0.0.1:8080/healthz
+curl -i -X POST http://127.0.0.1:8080/api/shorten \
+     -H 'Content-Type: application/json' -d '{"url":"https://example.com/hello"}'
+curl -i http://127.0.0.1:8080/<返回的短码>          # 302 跳转
+curl -i http://127.0.0.1:8080/api/stats/<短码>
+curl -s http://127.0.0.1:8080/metrics
+```
+
+```bash
+ctest --test-dir build --output-on-failure            # 38 个单元/集成测试
+cmake -B build-asan -DENABLE_ASAN=ON && cmake --build build-asan -j && ctest --test-dir build-asan   # 内存检查
+bash scripts/smoke_test.sh 8080                       # 冒烟：HTTP + 1000 并发 + fd 泄漏
+python3 tests/api/test_shorturl.py --base-url http://127.0.0.1:8080   # 接口自动化
+./build/echo_bench --host 127.0.0.1 --port 8080 --conns 500 --requests 200 --size 256 --mode http
 ```
 
 ## 目录
+
 ```
-include/mini_net/   公共头文件（接口在这里定义，实现由你写）
+include/mini_net/   公共头文件（EventLoop / EpollPoller / Channel / TcpServer / Buffer /
+                    MemoryPool / EventLoopThread(Pool) / HttpParser / HttpServer / ShortUrl*）
 src/                实现
-tests/              GoogleTest 单元测试
-bench/              压测客户端与压测脚本
-docs/               架构文档、周计划、面试自查清单
-scripts/            环境安装、压测、CI 辅助脚本
+tests/              GoogleTest 单元与集成测试（tests/api、tests/perf、tests/chaos 为 Python 测试）
+bench/              自写 C++ 压测客户端
+docs/               API 契约、架构与决策、周计划、压测结果、踩坑记录、面试准备
+scripts/            环境安装、冒烟测试、远程验证、压测
 ```
+
+## 关键设计权衡（详见 docs/ARCHITECTURE.md）
+
+- **epoll(ET)**：通知少、syscall 少，代价是必须读到 EAGAIN；
+- **one loop per thread**：连接读写天然串行、几乎无锁，代价是负载不均；
+- **空闲连接用时间戳 + 每秒扫描**：1 万连接只需 1 个定时器；代价是精度受扫描周期限制；
+- **对象池**：减少 malloc 次数、内存更可控；**实测单线程不比 glibc tcache 快**，收益在多线程与内存上限可控；
+- **写路径**：写缓冲 + EPOLLOUT，因为非阻塞 send 可能只写一半。
+
+## English
+
+**mini-net — a from-scratch C++17 high-concurrency network service.**
+
+No third-party networking or HTTP libraries: a hand-written Reactor on epoll (edge-triggered,
+non-blocking fds), one-loop-per-thread IO model with eventfd wakeups, a ring buffer using
+`readv` + a 64 KiB stack extra buffer, and a fixed-size object pool for connection objects.
+On top of it: an incremental HTTP/1.1 parser (handles partial packets, pipelining) and a URL
+shortener service (create / 302 redirect / stats / metrics).
+
+**Verified in CI**: 38 GoogleTest unit & integration tests, plus Release / ASAN+UBSan builds,
+a 1000-concurrent-connection smoke test with zero fd leaks, a hand-written C++ load generator,
+pytest API tests, Locust scenarios and chaos tests.
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+./build/mini_net_server 8080 30 4      # port, idle-timeout(sec), io-threads
+```
+
+See `docs/ARCHITECTURE.md` for the design trade-offs and `docs/RESULTS.md` for benchmark data.

@@ -12,7 +12,11 @@ if ! cmake --build build -j"$(nproc)" > /tmp/build.log 2>&1; then
   echo "编译失败："; grep -E "error:" /tmp/build.log | head -20; exit 1
 fi
 echo "构建成功；产物："
-ls -la build/mini_net_server build/echo_bench 2>/dev/null | awk '{print "  " $9 " (" $5 " 字节)"}'
+find build -maxdepth 2 -type f -executable \( -name mini_net_server -o -name echo_bench \) 2>/dev/null | while read -r f; do
+  echo "  $f ($(stat -c %s "$f") 字节)"
+done
+BENCH_BIN=$(find build -maxdepth 2 -type f -executable -name echo_bench | head -1)
+echo "压测客户端路径：${BENCH_BIN:-未找到}"
 
 echo
 echo "================ 2/6 单元/集成测试 ================"
@@ -25,9 +29,13 @@ echo "================ 3/6 接口自动化测试（pytest）================"
 ./build/mini_net_server "$PORT" 30 4 > /tmp/server_api.log 2>&1 &
 API_PID=$!
 sleep 1.5
-if python3 -m pytest tests/api/test_shorturl.py --base-url "http://127.0.0.1:$PORT" -q 2>&1 | tail -25; then
-  echo "pytest 完成"
-fi
+python3 -m pytest tests/api/test_shorturl.py --base-url "http://127.0.0.1:$PORT" -q > /tmp/pytest.log 2>&1
+echo "pytest 退出码: $?"
+tail -3 /tmp/pytest.log
+echo "--- 失败用例名 ---"
+grep -E "^FAILED|^ERROR" /tmp/pytest.log | head -20
+echo "--- 失败断言摘要 ---"
+grep -E "AssertionError" /tmp/pytest.log | head -10
 kill "$API_PID" 2>/dev/null; sleep 1
 
 echo
@@ -49,7 +57,7 @@ for t in 1 4; do
   ./build/mini_net_server "$PORT" 30 "$t" > /tmp/server_$t.log 2>&1 &
   pid=$!; sleep 1.5
   echo "--- IO 线程 = $t ---"
-  timeout 180 ./build/echo_bench --host 127.0.0.1 --port "$PORT" --conns 200 --requests 200 --size 256 --mode http 2>&1 | tail -12 || echo "  （该场景失败/超时）"
+  timeout 180 "$BENCH_BIN" --host 127.0.0.1 --port "$PORT" --conns 200 --requests 200 --size 256 --mode http 2>&1 | tail -14 || echo "  （该场景失败/超时）"
   kill "$pid" 2>/dev/null; sleep 1
 done
 
