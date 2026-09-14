@@ -23,6 +23,7 @@ public:
     int threadNum() const { return thread_num_; }
 
     void start();              // 创建线程并启动所有 sub loop
+    void stop();               // 优雅停止：quit 每个 sub loop 并 join 线程
     EventLoop* nextLoop();     // round-robin；线程数为 0 时返回 base loop
 
 private:

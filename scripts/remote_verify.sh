@@ -8,7 +8,12 @@ PORT=8080
 
 echo "=============== 1/6 构建（Release）==============="
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release > /dev/null || { echo "配置失败"; exit 1; }
-cmake --build build -j"$(nproc)" 2>&1 | tail -5 || { echo "编译失败"; exit 1; }
+if ! cmake --build build -j"$(nproc)" > /tmp/build.log 2>&1; then
+  echo "编译失败，错误摘要："
+  grep -E "error:" /tmp/build.log | head -30
+  exit 1
+fi
+grep -E "warning:" /tmp/build.log | head -10 || true
 echo "构建成功，二进制大小：$(stat -c %s build/mini_net_server) 字节"
 
 echo

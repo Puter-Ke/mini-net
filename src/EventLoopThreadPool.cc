@@ -25,6 +25,13 @@ void EventLoopThreadPool::start() {
     LOG_INFO("IO 线程池已启动：%d 个 sub loop", thread_num_);
 }
 
+void EventLoopThreadPool::stop() {
+    for (auto& t : threads_) t->stop();   // 内部：quit + join
+    threads_.clear();
+    loops_.clear();
+    LOG_INFO("IO 线程池已停止");
+}
+
 EventLoop* EventLoopThreadPool::nextLoop() {
     if (loops_.empty()) return base_loop_;
     EventLoop* loop = loops_[next_ % loops_.size()];

@@ -27,9 +27,9 @@ int64_t nowMs() {
 // 每条连接的落地点。注意 last_active_ms 是原子的：
 // 它在 IO 线程写、在 base loop 的扫描线程读，用普通 int64_t 就是数据竞争（TSAN 会报）。
 struct TcpServer::Conn {
-    Conn(int fd, EventLoop* loop) : fd(fd), loop(loop), channel(fd, loop), last_active_ms(nowMs()) {}
+    Conn(int fd, EventLoop* owner) : fd(fd), owner_loop(owner), channel(fd, owner), last_active_ms(nowMs()) {}
     int fd;
-    EventLoop* loop;
+    EventLoop* owner_loop;
     Channel channel;
     Buffer in;
     std::atomic<int64_t> last_active_ms;
@@ -170,7 +170,7 @@ void TcpServer::handleReadable(const std::shared_ptr<Conn>& conn) {
 }
 
 void TcpServer::closeConn(const std::shared_ptr<Conn>& conn, const char* reason) {
-    EventLoop* io = conn->loop;
+    EventLoop* io = conn->owner_loop;
     if (!io->isInLoopThread()) {
         // 跨线程关闭：派发到该连接的 owner loop，避免在别人线程里动它的 Channel
         const std::string r(reason);
