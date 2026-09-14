@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ valgrind netcat-openbsd iproute2
+
+      - name: 配置并构建（Release）
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j
+
+      - name: 单元测试
+        run: ctest --test-dir build --output-on-failure
+
+      - name: ASAN + UBSan 构建与测试
+        run: |
+          cmake -B build-asan -G Ninja -DENABLE_ASAN=ON -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build-asan -j
+          ctest --test-dir build-asan --output-on-failure
+
+      - name: 冒烟测试（回显 + 1000 并发 + fd 泄漏检查）
+        run: CONNS=1000 bash scripts/smoke_test.sh 8080
