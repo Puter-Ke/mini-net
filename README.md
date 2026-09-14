@@ -18,8 +18,8 @@
 | M3 | one loop per thread + IO 线程池 + eventfd 跨线程唤醒 | 多线程回显测试、跨线程任务延迟 < 200ms 断言 |
 | M4 | 环形缓冲（readv + 空间复用）+ 定长对象池 | 单测覆盖扩容/复用/半包；对象池实测结论 |
 | M5 | HTTP/1.1 增量解析 + 短链业务 + 路由 | 38 个 gtest 用例 + 冒烟全链路 |
-| M6 | 自写 C++ 压测客户端 + 对照实验 | bench/echo_bench，结果见 docs/RESULTS.md |
-| M7 | pytest 接口测试 + Locust + 混沌测试 | CI 中执行 |
+| M6 | 自写 C++ 压测客户端（非阻塞 connect + epoll，1573 行） | bench/echo_bench，结果见 docs/RESULTS.md |
+| M7 | pytest 接口测试（90 用例）+ Locust + 混沌测试（5 场景） | CI 中执行，全部通过 |
 | M8 | 架构文档、双语 README、面试准备 | 本文件 + docs/ |
 
 ## 快速开始（Linux / WSL / Codespaces）

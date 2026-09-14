@@ -43,27 +43,36 @@ int dialWithTimeout() {
     return fd;
 }
 
-std::string readResponse(int fd) {
-    std::string resp;
-    char buf[4096];
-    size_t header_end = std::string::npos;
-    size_t content_length = 0;
-    for (int i = 0; i < 50; ++i) {
-        const ssize_t n = ::recv(fd, buf, sizeof buf, 0);
-        if (n <= 0) break;
-        resp.append(buf, static_cast<size_t>(n));
-        if (header_end == std::string::npos) {
-            header_end = resp.find("\r\n\r\n");
+// 带缓冲的响应读取器：服务器可能把多个响应合并在一段 TCP 里（粘包反向场景），
+// 所以必须把多余的字节留在缓冲里下次再用，否则会"读不到"后续响应。
+struct HttpReader {
+    int fd;
+    std::string buf;
+
+    std::string next() {
+        while (true) {
+            const size_t header_end = buf.find("\r\n\r\n");
             if (header_end != std::string::npos) {
-                const std::string hdr = resp.substr(0, header_end);
-                const size_t p = hdr.find("Content-Length:");
-                if (p != std::string::npos) content_length = static_cast<size_t>(std::stoul(hdr.substr(p + 15)));
+                size_t content_length = 0;
+                const std::string hdr = buf.substr(0, header_end);
+                const size_t pos = hdr.find("Content-Length:");
+                if (pos != std::string::npos) {
+                    content_length = static_cast<size_t>(std::stoul(hdr.substr(pos + 15)));
+                }
+                const size_t total = header_end + 4 + content_length;
+                if (buf.size() >= total) {
+                    std::string resp = buf.substr(0, total);
+                    buf.erase(0, total);
+                    return resp;
+                }
             }
+            char tmp[4096];
+            const ssize_t n = ::recv(fd, tmp, sizeof tmp, 0);
+            if (n <= 0) return {};
+            buf.append(tmp, static_cast<size_t>(n));
         }
-        if (header_end != std::string::npos && resp.size() >= header_end + 4 + content_length) break;
     }
-    return resp;
-}
+};
 
 int statusOf(const std::string& r) { return r.size() < 12 ? -1 : std::stoi(r.substr(9, 3)); }
 
@@ -116,6 +125,7 @@ TEST_F(SplitRequestTest, RequestSplitIntoThreeChunks) {
     for (int round = 0; round < 20; ++round) {
         const int fd = dialWithTimeout();
         ASSERT_GE(fd, 0);
+        HttpReader reader{fd, {}};
         const std::string req = shortenRequest("https://example.com/split/" + std::to_string(round), false);
         const size_t third = req.size() / 3;
         const std::vector<std::string> chunks = {req.substr(0, third), req.substr(third, third),
@@ -124,7 +134,7 @@ TEST_F(SplitRequestTest, RequestSplitIntoThreeChunks) {
             ASSERT_EQ(::send(fd, c.data(), c.size(), 0), static_cast<ssize_t>(c.size()));
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
-        const std::string resp = readResponse(fd);
+        const std::string resp = reader.next();
         ::close(fd);
         if (statusOf(resp) != 201) {
             std::printf("SPLIT-DEBUG 第 %d 轮 status=%d 原始响应=[%s]\n", round, statusOf(resp),
@@ -139,13 +149,14 @@ TEST_F(SplitRequestTest, RequestSplitIntoThreeChunks) {
 TEST_F(SplitRequestTest, ThreeRequestsCoalescedInOnePacket) {
     const int fd = dialWithTimeout();
     ASSERT_GE(fd, 0);
+    HttpReader reader{fd, {}};
     std::string all;
     for (int i = 0; i < 3; ++i) {
         all += shortenRequest("https://example.com/coalesced/" + std::to_string(i), true);
     }
     ASSERT_EQ(::send(fd, all.data(), all.size(), 0), static_cast<ssize_t>(all.size()));
     for (int i = 0; i < 3; ++i) {
-        const std::string resp = readResponse(fd);
+        const std::string resp = reader.next();
         EXPECT_EQ(statusOf(resp), 201) << "第 " << i + 1 << " 条粘包请求异常：" << resp.substr(0, 120);
     }
     ::close(fd);
@@ -156,9 +167,10 @@ TEST_F(SplitRequestTest, RapidConnectCloseDoesNotLeakParserState) {
     for (int round = 0; round < 40; ++round) {
         const int fd = dialWithTimeout();
         ASSERT_GE(fd, 0);
+        HttpReader reader{fd, {}};
         const std::string req = shortenRequest("https://example.com/rapid/" + std::to_string(round), false);
         ASSERT_EQ(::send(fd, req.data(), req.size(), 0), static_cast<ssize_t>(req.size()));
-        const std::string resp = readResponse(fd);
+        const std::string resp = reader.next();
         ::close(fd);
         ASSERT_EQ(statusOf(resp), 201) << "第 " << round << " 轮失败（fd 复用时读到了旧解析状态）";
         ASSERT_NE(resp.find("https://example.com/rapid/" + std::to_string(round)), std::string::npos)
@@ -179,12 +191,13 @@ TEST_F(SplitRequestTest, ConcurrentSameUrlIsIdempotent) {
         workers.emplace_back([&, i] {
             const int fd = dialWithTimeout();
             if (fd < 0) return;
+            HttpReader reader{fd, {}};
             const std::string req = shortenRequest(url, true);
             if (::send(fd, req.data(), req.size(), 0) != static_cast<ssize_t>(req.size())) {
                 ::close(fd);
                 return;
             }
-            const std::string resp = readResponse(fd);
+            const std::string resp = reader.next();
             ::close(fd);
             raw[static_cast<size_t>(i)] = resp.substr(0, 100);
             statuses[static_cast<size_t>(i)] = statusOf(resp);
@@ -213,11 +226,12 @@ TEST_F(SplitRequestTest, ConcurrentSameUrlIsIdempotent) {
 TEST_F(SplitRequestTest, SequentialRequestsOnKeepAliveConnection) {
     const int fd = dialWithTimeout();
     ASSERT_GE(fd, 0);
+    HttpReader reader{fd, {}};
     for (int i = 0; i < 5; ++i) {
         const std::string url = "https://example.com/seq/" + std::to_string(i);
         const std::string req = shortenRequest(url, true);
         ASSERT_EQ(::send(fd, req.data(), req.size(), 0), static_cast<ssize_t>(req.size()));
-        const std::string resp = readResponse(fd);
+        const std::string resp = reader.next();
         ASSERT_EQ(statusOf(resp), 201) << "第 " << i + 1 << " 次顺序请求失败：" << resp.substr(0, 150);
         EXPECT_NE(resp.find(url), std::string::npos) << "第 " << i + 1 << " 次响应串台：" << resp.substr(0, 150);
     }
@@ -228,12 +242,13 @@ TEST_F(SplitRequestTest, SequentialRequestsOnKeepAliveConnection) {
 TEST_F(SplitRequestTest, MixedOperationsOnOneKeepAliveConnection) {
     const int fd = dialWithTimeout();
     ASSERT_GE(fd, 0);
+    HttpReader reader{fd, {}};
 
     const std::string json = "{\"url\":\"https://example.com/mixed\"}";
     std::string req = "POST /api/shorten HTTP/1.1\r\nHost: t\r\nContent-Length: " +
                       std::to_string(json.size()) + "\r\nConnection: keep-alive\r\n\r\n" + json;
     ASSERT_EQ(::send(fd, req.data(), req.size(), 0), static_cast<ssize_t>(req.size()));
-    const std::string r1 = readResponse(fd);
+    const std::string r1 = reader.next();
     ASSERT_EQ(statusOf(r1), 201) << r1.substr(0, 150);
     const size_t p = r1.find("\"code\":\"");
     ASSERT_NE(p, std::string::npos);
@@ -244,14 +259,14 @@ TEST_F(SplitRequestTest, MixedOperationsOnOneKeepAliveConnection) {
     // 跳转
     const std::string r2req = "GET /" + code + " HTTP/1.1\r\nHost: t\r\nConnection: keep-alive\r\n\r\n";
     ASSERT_EQ(::send(fd, r2req.data(), r2req.size(), 0), static_cast<ssize_t>(r2req.size()));
-    const std::string r2 = readResponse(fd);
+    const std::string r2 = reader.next();
     EXPECT_EQ(statusOf(r2), 302) << r2.substr(0, 150);
 
     // 统计
     const std::string r3req =
         "GET /api/stats/" + code + " HTTP/1.1\r\nHost: t\r\nConnection: keep-alive\r\n\r\n";
     ASSERT_EQ(::send(fd, r3req.data(), r3req.size(), 0), static_cast<ssize_t>(r3req.size()));
-    const std::string r3 = readResponse(fd);
+    const std::string r3 = reader.next();
     EXPECT_EQ(statusOf(r3), 200) << r3.substr(0, 150);
     EXPECT_NE(r3.find("\"hits\":1"), std::string::npos) << r3.substr(0, 150);
 
@@ -260,7 +275,7 @@ TEST_F(SplitRequestTest, MixedOperationsOnOneKeepAliveConnection) {
     std::string req2 = "POST /api/shorten HTTP/1.1\r\nHost: t\r\nContent-Length: " +
                        std::to_string(json2.size()) + "\r\nConnection: keep-alive\r\n\r\n" + json2;
     ASSERT_EQ(::send(fd, req2.data(), req2.size(), 0), static_cast<ssize_t>(req2.size()));
-    const std::string r4 = readResponse(fd);
+    const std::string r4 = reader.next();
     EXPECT_EQ(statusOf(r4), 201) << r4.substr(0, 150);
 
     ::close(fd);
@@ -270,13 +285,14 @@ TEST_F(SplitRequestTest, MixedOperationsOnOneKeepAliveConnection) {
 TEST_F(SplitRequestTest, UnicodeEscapedUrlIsDecoded) {
     const int fd = dialWithTimeout();
     ASSERT_GE(fd, 0);
+    HttpReader reader{fd, {}};
     const std::string url = "https://example.com/\u4e2d\u6587?k=\u503c";
     // 手工构造 \uXXXX 转义（模拟部分客户端的行为）
     std::string json = "{\"url\":\"https://example.com/\\u4e2d\\u6587?k=\\u503c\"}";
     std::string req = "POST /api/shorten HTTP/1.1\r\nHost: t\r\nContent-Length: " +
                       std::to_string(json.size()) + "\r\nConnection: close\r\n\r\n" + json;
     ASSERT_EQ(::send(fd, req.data(), req.size(), 0), static_cast<ssize_t>(req.size()));
-    const std::string resp = readResponse(fd);
+    const std::string resp = reader.next();
     ::close(fd);
     ASSERT_EQ(statusOf(resp), 201) << resp.substr(0, 150);
     EXPECT_NE(resp.find(url), std::string::npos) << "转义没有被还原：" << resp.substr(0, 200);
@@ -286,11 +302,12 @@ TEST_F(SplitRequestTest, UnicodeEscapedUrlIsDecoded) {
 TEST_F(SplitRequestTest, TruncatedJsonIsRejected) {
     const int fd = dialWithTimeout();
     ASSERT_GE(fd, 0);
+    HttpReader reader{fd, {}};
     const std::string json = "{\"url\":\"https://example.com/truncated\"";
     std::string req = "POST /api/shorten HTTP/1.1\r\nHost: t\r\nContent-Length: " +
                       std::to_string(json.size()) + "\r\nConnection: close\r\n\r\n" + json;
     ASSERT_EQ(::send(fd, req.data(), req.size(), 0), static_cast<ssize_t>(req.size()));
-    const std::string resp = readResponse(fd);
+    const std::string resp = reader.next();
     ::close(fd);
     EXPECT_EQ(statusOf(resp), 400) << "截断的 JSON 被接受了：" << resp.substr(0, 150);
 }
