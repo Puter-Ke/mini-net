@@ -22,6 +22,11 @@
 | M7 | pytest 接口测试（90 用例）+ Locust + 混沌测试（5 场景） | CI 中执行，全部通过 |
 | M8 | 架构文档、双语 README、面试准备 | 本文件 + docs/ |
 
+## 第一次用？（写给新手的逐步指南）
+
+没有 Linux 环境、也没跑过 C++ 项目的话，看 **[docs/使用指南.md](docs/使用指南.md)**：
+用浏览器里的 GitHub Codespaces，不用装任何软件，5 分钟就能把服务跑起来并访问短链。
+
 ## 快速开始（Linux / WSL / Codespaces）
 
 ```bash
@@ -40,7 +45,7 @@ curl -s http://127.0.0.1:8080/metrics
 ```
 
 ```bash
-ctest --test-dir build --output-on-failure            # 38 个单元/集成测试
+ctest --test-dir build --output-on-failure            # 49 个单元/集成测试
 cmake -B build-asan -DENABLE_ASAN=ON && cmake --build build-asan -j && ctest --test-dir build-asan   # 内存检查
 bash scripts/smoke_test.sh 8080                       # 冒烟：HTTP + 1000 并发 + fd 泄漏
 python3 tests/api/test_shorturl.py --base-url http://127.0.0.1:8080   # 接口自动化
