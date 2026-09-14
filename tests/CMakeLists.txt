@@ -12,7 +12,10 @@ add_executable(mininet_tests
   test_buffer.cc
   test_timer_wheel.cc
   test_event_loop.cc
+  test_wakeup.cc
+  test_thread_pool.cc
   test_idle_timeout.cc
+  test_multithread_server.cc
 )
 target_link_libraries(mininet_tests PRIVATE mininet GTest::gtest_main)
 

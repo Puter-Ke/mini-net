@@ -17,13 +17,20 @@ if(ENABLE_ASAN)
   add_link_options(-fsanitize=address,undefined)
 endif()
 
+option(ENABLE_TSAN "Enabled ThreadSanitizer" OFF)
+if(ENABLE_TSAN)
+  add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=thread)
+endif()
+
 # 核心库。规矩：每写完一个模块，把它对应的 .cc 加到这里（不要用 file(GLOB)）。
-# M1 已完成：EventLoop / EpollPoller / Channel / TcpServer
-# 待加入：# src/ThreadPool.cc   src/HttpParser.cc   src/MemoryPool.cc
 add_library(mininet STATIC
   src/EventLoop.cc
   src/EpollPoller.cc
   src/Channel.cc
+  src/EventLoopThread.cc
+  src/EventLoopThreadPool.cc
+  src/ThreadPool.cc
   src/TcpServer.cc
   src/Buffer.cc
   src/TimerWheel.cc

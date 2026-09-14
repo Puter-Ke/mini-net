@@ -1,16 +1,20 @@
 #pragma once
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 
 #include "mini_net/Channel.h"
 #include "mini_net/EventLoop.h"
+#include "mini_net/EventLoopThreadPool.h"
 
 namespace mininet {
 
-// 门卫 + 花名册：listen / accept / 管理连接生命周期 / 踢掉空闲连接
+// 门卫 + 花名册。M3：多线程版 —— base loop 只负责 accept，
+// 每条连接绑定到一个 sub loop（one loop per thread），读写天然串行、几乎不需要锁。
 class TcpServer {
 public:
     using MessageCallback = std::function<void(int conn_fd, const char* data, size_t len)>;
@@ -18,37 +22,46 @@ public:
 
     TcpServer(EventLoop* loop, uint16_t port);
     ~TcpServer();
+    TcpServer(const TcpServer&) = delete;
 
     void setMessageCallback(MessageCallback cb) { on_message_ = std::move(cb); }
     void setConnectionCallback(ConnectionCallback cb) { on_connection_ = std::move(cb); }
-
-    // 空闲超过 seconds 秒没有任何数据往来就关闭连接；<=0 表示关闭该功能
     void setIdleTimeoutSeconds(int seconds) { idle_timeout_s_ = seconds; }
+    void setThreadNum(int n) { thread_num_ = n; }
 
     void start();
-    uint64_t totalConnections() const { return conn_count_; }
-    size_t aliveConnections() const { return conns_.size(); }
-    uint64_t totalReceivedBytes() const { return recv_bytes_; }
+
+    uint64_t totalConnections() const { return conn_count_.load(); }
+    size_t aliveConnections() const;
+    uint64_t totalReceivedBytes() const { return recv_bytes_.load(); }
+    uint64_t closedIdle() const { return closed_idle_.load(); }
 
 private:
-    struct Conn;   // 每条连接的私有状态（fd + Channel + 读缓冲 + 最后活跃时间）
+    struct Conn;   // fd + Channel + 读缓冲 + 最后活跃时间 + 归属 loop
 
-    void handleAccept();
-    void handleReadable(int fd);
-    void closeConn(int fd, const char* reason);
-    void sweepIdle();     // 周期扫描，踢掉空闲连接
-    void reportStats();   // 周期打印统计
+    void handleAccept();                                        // base loop
+    void addConnection(int cfd, EventLoop* io_loop, const char* ip, uint16_t peer_port);  // io loop
+    void handleReadable(const std::shared_ptr<Conn>& conn);     // io loop
+    void closeConn(const std::shared_ptr<Conn>& conn, const char* reason);                // 任意线程，内部派发
+    void closeConnInLoop(const std::shared_ptr<Conn>& conn, const char* reason);          // 必须 io loop
+    void sweepIdle();                                           // base loop
+    void reportStats();                                         // base loop
 
     EventLoop* loop_;
     uint16_t port_;
     int listen_fd_{-1};
     std::unique_ptr<Channel> accept_channel_;
+    std::unique_ptr<EventLoopThreadPool> pool_;
+    int thread_num_{4};
+
+    mutable std::mutex conns_mtx_;                              // 保护 conns_
     std::unordered_map<int, std::shared_ptr<Conn>> conns_;
+
     MessageCallback on_message_;
     ConnectionCallback on_connection_;
-    uint64_t conn_count_{0};       // 历史累计连接数
-    uint64_t recv_bytes_{0};       // 累计收到字节数
-    uint64_t closed_idle_{0};      // 因空闲被踢掉的连接数
+    std::atomic<uint64_t> conn_count_{0};
+    std::atomic<uint64_t> recv_bytes_{0};
+    std::atomic<uint64_t> closed_idle_{0};
     int idle_timeout_s_{30};
     int idle_timer_id_{-1};
     int stats_timer_id_{-1};
