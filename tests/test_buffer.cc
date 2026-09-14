@@ -34,12 +34,17 @@ TEST(BufferTest, SpaceIsReusedAfterRetrieveAll) {
 
 TEST(BufferTest, ReusesPrependableSpaceWithoutGrowing) {
     Buffer buf(128);
-    const size_t cap = buf.writableBytes();
-    // 制造"已读空洞"：写入 100 字节，取走 50，再写 50 —— 应该复用空洞，不扩容
+    const size_t total_capacity = buf.prependableBytes() + buf.writableBytes() + buf.readableBytes();
+
+    // 制造"已读空洞"：写 100、取走 50（产生 50 字节空洞）、再写 40
+    // 正确实现应该复用空洞（memmove 复位），而不是扩容
     buf.append(std::string(100, 'a'));
     buf.retrieve(50);
     buf.append(std::string(40, 'b'));
-    EXPECT_EQ(buf.writableBytes() + buf.readableBytes(), cap + 0u);
+
+    EXPECT_EQ(buf.prependableBytes() + buf.writableBytes() + buf.readableBytes(), total_capacity)
+        << "底层缓冲被扩容了，说明没有复用已读空间";
+    EXPECT_EQ(buf.readableBytes(), 90u);   // 100 - 50 + 40
 }
 
 TEST(BufferTest, GrowsWhenNeeded) {

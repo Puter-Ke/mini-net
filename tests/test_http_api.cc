@@ -23,6 +23,11 @@ constexpr uint16_t kPort = 19080;
 int dial() {
     const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return -1;
+    // 关键：给客户端加接收超时。否则服务端一旦不回响应，recv 会永久阻塞，
+    // ctest 只能靠整体超时杀掉进程，报出来的是"Timeout"而不是真实原因。
+    timeval tv{};
+    tv.tv_sec = 3;
+    ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(kPort);
@@ -121,9 +126,9 @@ TEST_F(HttpApiTest, ShortenThenRedirectThenStats) {
     const int fd = dial();
     ASSERT_GE(fd, 0);
 
-    const std::string shortener =
-        "POST /api/shorten HTTP/1.1\r\nHost: x\r\nContent-Length: 26\r\n\r\n"
-        "{\"url\":\"https://a.com/1\"}";
+    const std::string json = "{\"url\":\"https://a.com/1\"}";
+    const std::string shortener = "POST /api/shorten HTTP/1.1\r\nHost: x\r\nContent-Length: " +
+                                  std::to_string(json.size()) + "\r\n\r\n" + json;
     const std::string resp1 = roundTrip(fd, shortener);
     ASSERT_EQ(statusOf(resp1), 201) << resp1;
     const std::string body1 = bodyOf(resp1);
@@ -159,8 +164,9 @@ TEST_F(HttpApiTest, KeepAliveServesMultipleRequests) {
 TEST_F(HttpApiTest, DuplicateUrlReturnsSameCode) {
     const int fd = dial();
     ASSERT_GE(fd, 0);
-    const std::string req =
-        "POST /api/shorten HTTP/1.1\r\nHost: x\r\nContent-Length: 26\r\n\r\n{\"url\":\"https://b.com/2\"}";
+    const std::string json = "{\"url\":\"https://b.com/2\"}";
+    const std::string req = "POST /api/shorten HTTP/1.1\r\nHost: x\r\nContent-Length: " +
+                            std::to_string(json.size()) + "\r\n\r\n" + json;
     const std::string r1 = roundTrip(fd, req);
     const std::string r2 = roundTrip(fd, req);
     ::close(fd);
