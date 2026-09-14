@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 
 #include "mini_net/Channel.h"
@@ -32,6 +33,11 @@ public:
 
     void start();
 
+    // 线程安全的发送接口：可在任意线程调用（内部派发到该连接的 IO 线程）。
+    // 非阻塞 fd 上 send 可能只写一部分，剩余数据进写缓冲并关注 EPOLLOUT。
+    void send(int fd, const std::string& data);
+    void shutdown(int fd);
+
     uint64_t totalConnections() const { return conn_count_.load(); }
     size_t aliveConnections() const;
     uint64_t totalReceivedBytes() const { return recv_bytes_.load(); }
@@ -45,6 +51,8 @@ private:
     void handleReadable(const std::shared_ptr<Conn>& conn);     // io loop
     void closeConn(const std::shared_ptr<Conn>& conn, const char* reason);                // 任意线程，内部派发
     void closeConnInLoop(const std::shared_ptr<Conn>& conn, const char* reason);          // 必须 io loop
+    void appendAndFlush(const std::shared_ptr<Conn>& conn, const std::string& data);      // io loop
+    void flushWrite(const std::shared_ptr<Conn>& conn);                                   // io loop
     void sweepIdle();                                           // base loop
     void reportStats();                                         // base loop
 

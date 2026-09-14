@@ -17,6 +17,8 @@ add_executable(mininet_tests
   test_thread_pool.cc
   test_idle_timeout.cc
   test_multithread_server.cc
+  test_http_parser.cc
+  test_http_api.cc
 )
 target_link_libraries(mininet_tests PRIVATE mininet GTest::gtest_main)
 

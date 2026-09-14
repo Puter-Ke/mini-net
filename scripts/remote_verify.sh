@@ -40,7 +40,7 @@ echo "=============== 5/5 轻量压测（单线程，500 连接，仅作基线�
 ./build/mini_net_server "$PORT" 30 1 > /tmp/s1.log 2>&1 &
 P1=$!
 sleep 1
-timeout 120 python3 scripts/bench_quick.py --conns 500 --requests 100 --size 256 --label "threads=1,500conns" || echo "  （压测超时或失败）"
+timeout 120 python3 scripts/bench_quick.py --conns 500 --requests 200 --size 256 --mode http --label "threads=1,500conns,HTTP" || echo "  （压测超时或失败）"
 kill "$P1" 2>/dev/null
 
 echo

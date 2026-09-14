@@ -34,6 +34,7 @@ struct TcpServer::Conn {
     EventLoop* owner_loop;
     Channel channel;
     Buffer in;
+    std::string out;                       // 写缓冲：非阻塞 send 只写一半时暂存
     std::atomic<int64_t> last_active_ms;
     uint64_t recv_bytes{0};
 };
@@ -140,6 +141,9 @@ void TcpServer::addConnection(int cfd, EventLoop* io_loop, const char* ip, uint1
     conn->channel.setReadCallback([this, weak] {
         if (auto c = weak.lock()) handleReadable(c);
     });
+    conn->channel.setWriteCallback([this, weak] {
+        if (auto c = weak.lock()) flushWrite(c);
+    });
     conn->channel.setCloseCallback([this, weak] {
         if (auto c = weak.lock()) closeConn(c, "对端关闭或出错");
     });
@@ -178,6 +182,62 @@ void TcpServer::handleReadable(const std::shared_ptr<Conn>& conn) {
         LOG_WARN("fd=%d 读失败：%s", fd, std::strerror(saved));
         closeConnInLoop(conn, "读错误");
         return;
+    }
+}
+
+void TcpServer::send(int fd, const std::string& data) {
+    std::shared_ptr<Conn> conn;
+    {
+        std::lock_guard<std::mutex> lk(conns_mtx_);
+        auto it = conns_.find(fd);
+        if (it == conns_.end()) return;
+        conn = it->second;
+    }
+    EventLoop* io = conn->owner_loop;
+    io->runInLoop([this, conn, data] { appendAndFlush(conn, data); });
+}
+
+void TcpServer::shutdown(int fd) {
+    std::shared_ptr<Conn> conn;
+    {
+        std::lock_guard<std::mutex> lk(conns_mtx_);
+        auto it = conns_.find(fd);
+        if (it == conns_.end()) return;
+        conn = it->second;
+    }
+    EventLoop* io = conn->owner_loop;
+    io->runInLoop([this, conn] { closeConnInLoop(conn, "主动关闭"); });
+}
+
+void TcpServer::appendAndFlush(const std::shared_ptr<Conn>& conn, const std::string& data) {
+    conn->last_active_ms.store(nowMs(), std::memory_order_relaxed);
+    conn->out.append(data);
+    if (conn->writing) return;   // 已经在等 EPOLLOUT，交给写事件回调继续
+    flushWrite(conn);
+}
+
+void TcpServer::flushWrite(const std::shared_ptr<Conn>& conn) {
+    while (!conn->out.empty()) {
+        const ssize_t n = ::send(conn->fd, conn->out.data(), conn->out.size(), MSG_NOSIGNAL);
+        if (n > 0) {
+            conn->out.erase(0, static_cast<size_t>(n));   // 小数据量够用；大数据量应改成读偏移
+            continue;
+        }
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            if (!conn->writing) {
+                conn->writing = true;
+                conn->channel.enableWriting();
+            }
+            return;
+        }
+        if (n < 0 && errno == EINTR) continue;
+        LOG_WARN("fd=%d 写失败：%s", conn->fd, std::strerror(errno));
+        closeConnInLoop(conn, "写错误");
+        return;
+    }
+    if (conn->writing) {
+        conn->writing = false;
+        conn->channel.disableWriting();
     }
 }
 

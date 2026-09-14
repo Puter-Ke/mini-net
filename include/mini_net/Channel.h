@@ -25,11 +25,15 @@ public:
     void setInPoller(bool v) { in_poller_ = v; }
 
     void setReadCallback(Callback cb) { read_cb_ = std::move(cb); }
+    void setWriteCallback(Callback cb) { write_cb_ = std::move(cb); }
     void setCloseCallback(Callback cb) { close_cb_ = std::move(cb); }
 
     // 打开/关闭关注的事件，并同步到 epoll
     void enableReading();
     void disableReading();
+    void enableWriting();     // 关注可写：非阻塞 send 只写了一半时用
+    void disableWriting();
+    bool isWriting() const { return writing_; }
     void disableAll();
 
     // 由 EpollPoller 在 epoll_wait 返回后调用
@@ -43,7 +47,9 @@ private:
     uint32_t events_{0};
     uint32_t revents_{0};
     bool in_poller_{false};
+    bool writing_{false};
     Callback read_cb_;
+    Callback write_cb_;
     Callback close_cb_;
 };
 

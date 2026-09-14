@@ -33,11 +33,26 @@ FD_BASE=$(ls /proc/$PID/fd 2>/dev/null | wc -l)
 echo "  fd 基线（空载）：$FD_BASE"
 ok "基线已记录"
 
-line "2. 回显测试"
-OUT=$(printf 'hello-mini-net\n' | timeout 5 nc -q 1 127.0.0.1 "$PORT" 2>/dev/null | tr -d '\r\n')
-if [ "$OUT" = "hello-mini-net" ]; then ok "回显正确"; else
-  bad "回显内容不对，收到的是：[$OUT]"
-  echo "  （如果服务端还没实现业务回调，这一条必然失败，先把 M1 写完）"
+line "2. HTTP 接口测试（M5 之后服务端讲 HTTP/1.1）"
+OUT=$(printf 'GET /healthz HTTP/1.1\r\nHost: smoke\r\nConnection: close\r\n\r\n' | timeout 5 nc -q 1 127.0.0.1 "$PORT" 2>/dev/null | tr -d '\r')
+if echo "$OUT" | head -1 | grep -q "200 OK"; then ok "GET /healthz 返回 200 OK"; else
+  bad "HTTP 响应异常，收到的是：[$(echo "$OUT" | head -1)]"
+fi
+if echo "$OUT" | tail -1 | grep -q "^ok$"; then ok "响应体为 ok"; else bad "响应体不是 ok"; fi
+
+# 短链全链路：创建 → 跳转
+BODY='{"url":"https://example.com/smoke-test-target"}'
+RESP=$(printf 'POST /api/shorten HTTP/1.1\r\nHost: smoke\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s' "${#BODY}" "$BODY" | timeout 5 nc -q 1 127.0.0.1 "$PORT" 2>/dev/null | tr -d '\r')
+CODE=$(echo "$RESP" | grep -o '"code":"[^"]*"' | head -1 | cut -d'"' -f4)
+if [ -n "$CODE" ]; then ok "创建短链成功，短码=$CODE"; else bad "创建短链失败：$RESP"; fi
+
+if [ -n "$CODE" ]; then
+  R2=$(printf 'GET /%s HTTP/1.1\r\nHost: smoke\r\nConnection: close\r\n\r\n' "$CODE" | timeout 5 nc -q 1 127.0.0.1 "$PORT" 2>/dev/null | tr -d '\r')
+  if echo "$R2" | grep -q "302 Found" && echo "$R2" | grep -q "Location: https://example.com/smoke-test-target"; then
+    ok "短链跳转 302 且 Location 正确"
+  else
+    bad "短链跳转异常：$(echo "$R2" | head -1)"
+  fi
 fi
 
 line "3. 并发连接测试（$CONNS 个）"

@@ -66,7 +66,7 @@ TEST(BufferTest, FindCrlfAndRetrieveUntil) {
 TEST(BufferTest, FindCrlfOnSplitInput) {
     // 真实网络里 \r 和 \n 可能分两次到达：找不到时必须返回 nullptr，不能越界读
     Buffer buf;
-    buf.append("GET /a HTTP/1.1\r", 15);
+    buf.append("GET /a HTTP/1.1\r", 16);   // 15 个字符 + \r
     EXPECT_EQ(buf.findCRLF(), nullptr);
     buf.append("\n", 1);
     ASSERT_NE(buf.findCRLF(), nullptr);

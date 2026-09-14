@@ -16,6 +16,18 @@ void Channel::enableReading() {
     update();
 }
 
+void Channel::enableWriting() {
+    events_ |= EPOLLOUT;
+    writing_ = true;
+    update();
+}
+
+void Channel::disableWriting() {
+    events_ &= ~static_cast<uint32_t>(EPOLLOUT);
+    writing_ = false;
+    update();
+}
+
 void Channel::disableReading() {
     events_ &= ~static_cast<uint32_t>(EPOLLIN | EPOLLRDHUP);
     update();
@@ -33,17 +45,22 @@ void Channel::update() {
 void Channel::handleEvent(uint32_t revents) {
     revents_ = revents;
 
-    // 对端关闭 / 出错，统一交给 close 回调处理
+    // 先把回调拷到栈上：回调内部可能关闭连接并析构 this，
+    // 那样后面再读成员就是 use-after-free（拷一份代价很小，换来确定性）
+    const Callback read_cb = read_cb_;
+    const Callback write_cb = write_cb_;
+    const Callback close_cb = close_cb_;
+
     if (revents & (EPOLLHUP | EPOLLERR)) {
-        if (close_cb_) close_cb_();
+        if (close_cb) close_cb();
         return;
     }
-    // EPOLLRDHUP：对端关掉写方向（半关闭），和可读一起处理
     if (revents & (EPOLLIN | EPOLLPRI | EPOLLRDHUP)) {
-        if (read_cb_) read_cb_();
+        if (read_cb) read_cb();
     }
-    // 注意：M1 只在读回调里直接写回（回显），不要在这里再调 write_cb_，
-    // 因为读回调可能已经把这条连接关掉并释放了 Channel（悬垂指针）。
+    if (revents & EPOLLOUT) {
+        if (write_cb) write_cb();
+    }
 }
 
 }  // namespace mininet

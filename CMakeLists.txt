@@ -32,6 +32,10 @@ add_library(mininet STATIC
   src/EventLoopThreadPool.cc
   src/ThreadPool.cc
   src/TcpServer.cc
+  src/HttpParser.cc
+  src/HttpServer.cc
+  src/ShortUrlService.cc
+  src/ShortUrlApp.cc
   src/Buffer.cc
   src/MemoryPool.cc
   src/TimerWheel.cc

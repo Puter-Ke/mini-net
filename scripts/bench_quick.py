@@ -15,7 +15,35 @@ import statistics
 import time
 
 
-async def worker(host, port, requests, size, conns_ready, go, samples, errors):
+HTTP_REQUEST = b'GET /healthz HTTP/1.1\r\nHost: bench\r\n\r\n'
+
+
+async def read_http_response(reader):
+    """读到完整 HTTP 响应（按 Content-Length 判断），返回响应字节数"""
+    total = 0
+    head = b''
+    while b'\r\n\r\n' not in head:
+        chunk = await reader.read(4096)
+        if not chunk:
+            raise ConnectionError('连接被关闭')
+        head += chunk
+        total += len(chunk)
+    header, rest = head.split(b'\r\n\r\n', 1)
+    clen = 0
+    for line in header.split(b'\r\n')[1:]:
+        if line.lower().startswith(b'content-length:'):
+            clen = int(line.split(b':', 1)[1].strip())
+    need = clen - len(rest)
+    while need > 0:
+        chunk = await reader.read(need)
+        if not chunk:
+            break
+        need -= len(chunk)
+        total += len(chunk)
+    return total
+
+
+async def worker(host, port, requests, size, conns_ready, go, samples, errors, mode='echo'):
     try:
         reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=10)
     except Exception:
@@ -35,9 +63,14 @@ async def worker(host, port, requests, size, conns_ready, go, samples, errors):
     try:
         for _ in range(requests):
             t0 = time.perf_counter()
-            writer.write(payload)
-            await writer.drain()
-            await reader.readexactly(size)
+            if mode == 'http':
+                writer.write(HTTP_REQUEST)
+                await writer.drain()
+                await read_http_response(reader)
+            else:
+                writer.write(payload)
+                await writer.drain()
+                await reader.readexactly(size)
             local.append((time.perf_counter() - t0) * 1e6)
     except Exception:
         errors.append('io')
@@ -61,6 +94,8 @@ async def main():
     ap.add_argument('--size', type=int, default=64)
     ap.add_argument('--label', default='')
     ap.add_argument('--wait-conns-ms', type=int, default=2000, help='等待连接建立的毫秒数')
+    ap.add_argument('--mode', choices=['echo', 'http'], default='http',
+                    help='echo=回显协议；http=发 GET /healthz（M5 之后默认）')
     args = ap.parse_args()
 
     conns_ready = [0]
@@ -70,7 +105,7 @@ async def main():
 
     tasks = [
         asyncio.create_task(worker(args.host, args.port, args.requests, args.size,
-                                   conns_ready, go, samples, errors))
+                                   conns_ready, go, samples, errors, args.mode))
         for _ in range(args.conns)
     ]
 
