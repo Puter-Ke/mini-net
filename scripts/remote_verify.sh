@@ -19,7 +19,7 @@ grep -E "warning:" /tmp/build.log | head -5 || true
 
 echo
 echo "=============== 2/5 单元/集成测试 ==============="
-timeout 180 ctest --test-dir build --output-on-failure 2>&1 | tail -6
+timeout 240 ctest --test-dir build --timeout 30 --output-on-failure 2>&1 | tail -8
 
 echo
 echo "=============== 3/5 冒烟测试（1000 并发 + fd 泄漏）==============="

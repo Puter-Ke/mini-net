@@ -23,7 +23,7 @@ jobs:
           cmake --build build -j
 
       - name: 单元测试
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --timeout 30 --output-on-failure
 
       - name: ASAN + UBSan 构建与测试
         run: |

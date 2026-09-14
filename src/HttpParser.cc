@@ -6,17 +6,6 @@
 
 namespace mininet {
 
-namespace {
-
-// 去掉首尾空白
-std::string strip(const std::string& s, size_t begin, size_t end) {
-    while (begin < end && (s[begin] == ' ' || s[begin] == '\t')) ++begin;
-    while (end > begin && (s[end - 1] == ' ' || s[end - 1] == '\t' || s[end - 1] == '\r')) --end;
-    return s.substr(begin, end - begin);
-}
-
-}  // namespace
-
 std::string HttpParser::lower(const std::string& s) {
     std::string out = s;
     for (char& c : out) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));

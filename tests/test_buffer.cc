@@ -78,8 +78,9 @@ TEST(BufferTest, ReadFdReadsThroughPipe) {
     ASSERT_EQ(::pipe(fds), 0);
     ::fcntl(fds[0], F_SETFL, O_NONBLOCK);
 
-    // 写 100KB（超过缓冲区初始容量，强制走 readv 的第二段 + 扩容路径）
-    const std::string payload(100 * 1024, 'z');
+    // 坑：Linux 匿名管道默认容量 64KB，写端是阻塞的话，写超过容量且没人读会永久阻塞。
+    // 所以这里用 32KB（< 64KB），既能触发 readv 的第二段 + 扩容路径，又不会自己把自己锁死。
+    const std::string payload(32 * 1024, 'z');
     const ssize_t written = ::write(fds[1], payload.data(), payload.size());
     ASSERT_EQ(written, static_cast<ssize_t>(payload.size()));
 
