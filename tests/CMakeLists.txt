@@ -19,6 +19,7 @@ add_executable(mininet_tests
   test_multithread_server.cc
   test_http_parser.cc
   test_http_api.cc
+  test_split_request.cc
 )
 target_link_libraries(mininet_tests PRIVATE mininet GTest::gtest_main)
 

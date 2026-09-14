@@ -40,7 +40,13 @@ void HttpServer::start() {
 }
 
 void HttpServer::onConnection(int fd, bool connected) {
-    if (!connected) drop(fd);
+    (void)connected;
+    // 无论新连接还是断开，都清掉这个 fd 的解析状态。
+    // 原因（实测踩到的真 bug）：内核会复用 fd。旧连接关闭后如果状态没清，
+    // 新连接复用同一个 fd 时，上一条连接的"半截请求"状态会让新数据被误解析，
+    // 表现为偶发 404（把请求体当成了新的请求行）。
+    // 新连接的 onConnection(fd, true) 一定发生在该 fd 任何数据回调之前，所以这里清是安全的。
+    drop(fd);
 }
 
 void HttpServer::handleError(int fd, const HttpParser::Error& err) {

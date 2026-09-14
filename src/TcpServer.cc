@@ -261,10 +261,13 @@ void TcpServer::closeConnInLoop(const std::shared_ptr<Conn>& conn, const char* r
         if (it == conns_.end()) return;   // 已经关过了
         conns_.erase(it);
     }
-    conn->channel.disableAll();   // 先从 poller 摘掉，再关 fd
+    conn->channel.disableAll();   // 先从 poller 摘掉
+    // 先通知应用层"连接没了"，再真正 close(fd)：
+    // close 之后这个 fd 立刻可能被内核分配给新连接，如果应用层状态晚一步才清，
+    // 就会出现"新连接读到旧状态"的竞态（本项目踩过：偶发 404）
+    if (on_connection_) on_connection_(fd, false);
     ::close(fd);
     LOG_INFO("关闭连接 fd=%d（%s，在线 %zu）", fd, reason, aliveConnections());
-    if (on_connection_) on_connection_(fd, false);
 }
 
 void TcpServer::sweepIdle() {
