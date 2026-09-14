@@ -49,7 +49,7 @@ TEST(HttpParserTest, FieldsSurviveAcrossIncrementalFeeds) {
     HttpParser::Error err;
     const std::string raw =
         "POST /api/shorten HTTP/1.1\r\nHost: t\r\nContent-Type: application/json\r\n"
-        "Content-Length: 18\r\nConnection: close\r\n\r\n{\"url\":\"https://a\"}";
+        "Content-Length: 19\r\nConnection: close\r\n\r\n{\"url\":\"https://a\"}";
     const size_t third = raw.size() / 3;
 
     EXPECT_EQ(feed(p, b, err, raw.substr(0, third)), HttpParser::Result::NeedMore);

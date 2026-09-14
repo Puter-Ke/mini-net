@@ -68,7 +68,8 @@ for t in 1 4; do
   ./build/mini_net_server "$PORT" 30 "$t" > /tmp/server_$t.log 2>&1 &
   pid=$!; sleep 1.5
   echo "--- IO 线程 = $t ---"
-  timeout 180 "$BENCH_BIN" --host 127.0.0.1 --port "$PORT" --conns 200 --requests 200 --size 256 --mode http 2>&1 | tail -14 || echo "  （该场景失败/超时）"
+  timeout 180 "$BENCH_BIN" --host 127.0.0.1 --port "$PORT" --conns 1000 --requests 200 --size 256 --mode http > /tmp/bench_$t.log 2>&1 || echo "  （该场景失败/超时）"
+  grep -E "QPS|吞吐|请求数|成功|失败|P50|P99|P999|延迟|耗时|CPU" /tmp/bench_$t.log | head -14
   kill "$pid" 2>/dev/null; sleep 1
 done
 
