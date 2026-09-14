@@ -6,6 +6,10 @@ set -uo pipefail
 cd "${GITHUB_WORKSPACE:-$PWD}"
 PORT=8080
 
+# 关键：runner 默认 fd 上限 1024，压 1000 并发客户端会失败（还会引发客户端侧死锁）
+ulimit -n 65535 2>/dev/null || true
+echo "fd 上限：$(ulimit -n)"
+
 echo "=============== 1/6 构建（Release）==============="
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release > /dev/null || { echo "配置失败"; exit 1; }
 if ! cmake --build build -j"$(nproc)" > /tmp/build.log 2>&1; then
