@@ -356,8 +356,8 @@ class TestRedirect:
            不是被自动跟到目标网址后的 200（resp.history 为空可以佐证）。
         """
         url = unique_url("r01")
+        print(f"[R-01] 创建短链后访问它，期望 302 且 Location 精确等于 {url}")
         code = shorten(url)
-        print(f"[R-01] 访问短链 /{code}，期望跳到 {url}")
 
         with allure_step("GET /{code} 期望 302"):
             resp = api.get("/" + code)
@@ -377,9 +377,9 @@ class TestRedirect:
         如果服务端把计数写漏或写重，这条用例会立刻发现。
         """
         url = unique_url("r02")
+        print(f"[R-02] 用一个全新的短码跳 3 次，hits 应当从 0 精确涨到 3；url={url}")
         code = shorten(url)
         before = get_hits(api, code)
-        print(f"[R-02] 短码 {code} 跳转前 hits={before}，准备跳 3 次")
 
         for index in range(3):
             resp = api.get("/" + code)
@@ -462,9 +462,9 @@ class TestRedirect:
         为什么这条重要？如果服务端内部用"不区分大小写"的方式存短码，
         ABC 和 abc 会互相覆盖，用户拿到的短链就会跳到别人的页面上（严重的串号 bug）。
         """
+        print("[R-06] 短码大小写敏感：先要到一个含小写字母的短码，再用全大写去查，期望 404")
         code = shorten_until_mixed_case(api, shorten, unique_url)
         upper = code.upper()
-        print(f"[R-06] 短码 {code!r} 是大小写混合的，用全大写 {upper!r} 去查，期望 404")
         assert upper != code, "前置条件：短码里必须含有小写字母"
         resp = api.get("/" + upper)
         assert_error_body(resp, 404, "not_found")
@@ -484,8 +484,8 @@ class TestStats:
         否则前端算数会变成字符串拼接），created_at 必须是秒级 Unix 时间戳。
         """
         url = unique_url("s01")
+        print(f"[S-01] 创建后查它的统计，检查字段齐全 + 类型正确；url={url}")
         code = shorten(url)
-        print(f"[S-01] 查短码 {code} 的统计")
 
         with allure_step("GET /api/stats/{code}"):
             resp = api.stats(code)
@@ -511,9 +511,9 @@ class TestStats:
         为什么要留 60 秒的富余？因为服务端和测试机的时间可能有几秒误差，
         卡得太死会因为"时钟没对齐"而误报失败。
         """
-        code = shorten(unique_url("s02"))
         now = int(time.time())
-        print(f"[S-02] 检查 {code} 的 created_at 是否合理（当前时间戳 {now}）")
+        print(f"[S-02] 新建短码的 created_at 应当落在合理区间（当前时间戳 {now}）")
+        code = shorten(unique_url("s02"))
         body = api.stats(code).json()
         created_at = body["created_at"]
         assert created_at > 1700000000, f"created_at 太小了，不像秒级时间戳：{created_at}"
@@ -526,8 +526,8 @@ class TestStats:
         这是"S-01 类型正确"之外的独立性检查：如果新码一出生 hits 就不是 0，
         说明计数逻辑一开始就多加了（比如把创建请求也算成一次访问）。
         """
+        print("[S-03] 全新短码还没被访问过，hits 必须是 0")
         code = shorten(unique_url("s03"))
-        print(f"[S-03] 新短码 {code} 的 hits 应当是 0")
         assert get_hits(api, code) == 0, "刚创建、还没被访问过的短码，hits 必须为 0"
 
     @pytest.mark.parametrize("code", ["zzzzzzzz", "NoSuchCd"], ids=["全小写8位", "混合大小写8位"])
@@ -744,8 +744,8 @@ class TestMethodNotAllowed:
 
         v1 不支持删除短链，所以这条路径只允许 GET。允许删除是很危险的（容易被恶意刷掉数据）。
         """
+        print("[M-02] DELETE /{code} 应当被拒绝为 405，且 Allow 头里含 GET")
         code = shorten(unique_url("m02"))
-        print(f"[M-02] DELETE /{code} 应当被拒绝为 405")
         resp = api.request("DELETE", "/" + code)
         assert_error_body(resp, 405, "method_not_allowed")
         allow = resp.headers.get("Allow", "")
@@ -1009,9 +1009,9 @@ class TestConcurrency:
         两个线程会读到同一个旧值，各加一次，最后只涨了 1 —— 统计就少算了。
         这正是"压测发现的问题单靠单线程测不出来"的典型例子。
         """
+        print("[P-03] 并发跳转同一个短码 100 次，hits 应当精确涨 100")
         code = shorten(unique_url("p03"))
         before = get_hits(api, code)
-        print(f"[P-03] 并发跳转 /{code} 100 次（跳转前 hits={before}）")
         statuses: List[int] = []
         errors: List[str] = []
 
@@ -1046,8 +1046,8 @@ class TestMisc:
         任何一处不一致都说明数据是"各写各的"，不是单一数据源。
         """
         url = unique_url("x01")
+        print(f"[X-01] 交叉核对创建、跳转、统计三个接口里的 url 是否一致；url={url}")
         code = shorten(url)
-        print(f"[X-01] 交叉核对短码 {code} 在三个接口里的 url")
 
         redirect = api.redirect(code)
         assert redirect.status_code == 302, f"期望 302，实际 {redirect.status_code}"
@@ -1078,8 +1078,8 @@ class TestMisc:
         业务指标（创建了多少条、跳转了多少次）是运维看板的核心数据。
         如果它不涨，看板就是"死"的，出问题时完全看不出服务到底在不在干活。
         """
+        print("[X-03] 创建一条短链，观察 /metrics 的 shorten_total 是否增加")
         before = api.metrics()
-        print("[X-03] 创建一条短链，观察 shorten_total 是否增加")
         api.shorten(unique_url("x03"))
         after = api.metrics()
         assert "shorten_total" in before and "shorten_total" in after, f"指标缺字段：{before} / {after}"
@@ -1089,9 +1089,9 @@ class TestMisc:
 
     def test_x04_redirect_updates_metrics(self, api, shorten, unique_url):
         """用例 X-04：跳转一次会让 /metrics 里的 redirect_total 增加至少 1。"""
+        print("[X-04] 跳转一次，观察 /metrics 的 redirect_total 是否至少涨 1")
         code = shorten(unique_url("x04"))
         before = api.metrics()
-        print(f"[X-04] 跳转一次 /{code}，观察 redirect_total 是否增加")
         assert api.redirect(code).status_code == 302, "跳转应当返回 302"
         after = api.metrics()
         assert "redirect_total" in before and "redirect_total" in after, f"指标缺字段：{before} / {after}"
@@ -1104,7 +1104,7 @@ class TestMisc:
 
         这条看着很傻，但它能一眼抓出"时间戳算反了""用了未初始化的变量"这类低级错误。
         """
+        print("[X-05] uptime_seconds 应该是非负数（服务至少活了 0 秒）")
         metrics = api.metrics()
-        print(f"[X-05] uptime_seconds={metrics.get('uptime_seconds')}")
         assert "uptime_seconds" in metrics, f"指标里没有 uptime_seconds：{metrics!r}"
         assert metrics["uptime_seconds"] >= 0, f"uptime_seconds 不该是负数：{metrics['uptime_seconds']}"

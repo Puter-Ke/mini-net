@@ -1344,7 +1344,9 @@ def print_summary(records):
     else:
         print(f"结论：有 {len(failed)} 个场景没通过：")
         for rec in failed:
-            print(f"  - {rec.name}：{rec.detail}")
+            # 场景名前面已经打过了，这里把详情里重复的那一遍“服务在「场景名」之后”去掉
+            detail = rec.detail.replace(f"服务在「{rec.name}」之后失去了自愈能力", "服务失去了自愈能力")
+            print(f"  - {rec.name}：{detail}")
     return not failed
 
 
