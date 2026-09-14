@@ -27,7 +27,8 @@ int64_t nowMs() {
 // 每条连接的落地点。注意 last_active_ms 是原子的：
 // 它在 IO 线程写、在 base loop 的扫描线程读，用普通 int64_t 就是数据竞争（TSAN 会报）。
 struct TcpServer::Conn {
-    Conn(int fd, EventLoop* owner) : fd(fd), owner_loop(owner), channel(fd, owner), last_active_ms(nowMs()) {}
+    Conn(int conn_fd, EventLoop* owner)
+        : fd(conn_fd), owner_loop(owner), channel(conn_fd, owner), last_active_ms(nowMs()) {}
     int fd;
     EventLoop* owner_loop;
     Channel channel;

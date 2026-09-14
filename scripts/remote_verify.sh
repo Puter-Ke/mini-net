@@ -42,9 +42,9 @@ run_bench() {
   local pid=$!
   sleep 1
   echo "--- IO 线程数 = $threads ---"
-  python3 scripts/bench_quick.py --conns 100 --requests 300 --size 64 --label "threads=$threads,100conns"
+  python3 scripts/bench_quick.py --conns 500  --requests 200 --size 256 --label "threads=$threads,500conns,256B"
   echo
-  python3 scripts/bench_quick.py --conns 500 --requests 100 --size 64 --label "threads=$threads,500conns"
+  python3 scripts/bench_quick.py --conns 1000 --requests 100 --size 256 --label "threads=$threads,1000conns,256B"
   kill "$pid" 2>/dev/null
   sleep 1
 }
