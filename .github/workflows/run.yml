@@ -1,0 +1,28 @@
+name: Remote Run
+
+# 用法：gh workflow run run.yml -f script='要执行的命令'
+# 相当于一台按需启动的 Linux 机器：编译、跑测试、跑压测、排查问题都能用
+on:
+  workflow_dispatch:
+    inputs:
+      script:
+        description: '要执行的 bash 脚本'
+        required: true
+        type: string
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装依赖
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cmake ninja-build g++ valgrind netcat-openbsd iproute2 python3-pip
+
+      - name: 执行脚本
+        run: |
+          set -o pipefail
+          ${{ inputs.script }}
