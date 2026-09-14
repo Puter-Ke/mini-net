@@ -19,11 +19,16 @@
   - `cmake -B build-asan -DENABLE_ASAN=ON` 跑一遍无报错
 - **坑清单（记进 docs/PITFALLS.md）**：EAGAIN/EINTR 处理、accept 只调一次导致连接堆积、ET 下漏读、SIGPIPE 直接杀进程（要用 MSG_NOSIGNAL）
 
-## 第 2 周：定时器 + 日志
-- `TimerWheel`：`addTimer/cancelTimer/tick`，tick 由 loop 每 100ms 驱动
-- 空闲连接超时踢掉（对比：不用定时器时 `ss -s` 看到的 CLOSE_WAIT 堆积）
-- 简单日志：级别、时间戳、异步落盘（先同步也行）
-- **验收**：`nc` 挂 10 秒不动的连接被服务端主动关闭；日志能定位到"哪个 fd 因为超时被关"
+## 第 2 周：定时器 + 日志 ✅ 已完成
+- [x] `EventLoop::runEvery`：周期任务（IO 派发之后执行，回调里 cancel 自身也安全）
+- [x] 空闲连接踢掉：**每个连接记最后活跃时间戳 + 每秒扫描**，而不是给每条连接挂一个定时器
+      （1 万连接 = 1 万个定时器对象，内存和刷新成本都高；扫描 O(n) 但常数极小、只要一个定时器）
+- [x] 日志：级别过滤 + 时间戳 + 文件行号（`include/mini_net/Logger.h`）
+- [x] 统计上报：每 5 秒打印在线连接、累计连接、累计流量、空闲清理数
+- [x] 集成测试 `test_idle_timeout.cc`：连上不发数据，3 秒内被服务端关闭（read 返回 0）
+- **验收**：`nc 127.0.0.1 8080` 挂着不动，30 秒后被服务端主动关闭，日志里能看到原因
+- 说明：`TimerWheel`（时间轮）保留给 M5 的海量一次性定时器（HTTP 读超时），
+  空闲连接这种"周期性扫描"场景用时间戳更简单——**面试时这正是"知道两种方案各自代价"的例子**"
 
 ## 第 3 周：多线程（one loop per thread）+ 线程池
 - main loop 只做 accept，把新连接 round-robin 分给 N 个 sub-loop（`EventLoopThreadPool`）

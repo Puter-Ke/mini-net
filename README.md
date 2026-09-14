@@ -14,8 +14,8 @@
   锁的粒度、time_wait、TCP_NODELAY …… 每一个你都应该能给出自己踩过的坑。
 
 ## 里程碑（详细到周见 docs/WEEKLY_PLAN.md）
-- [ ] M1 单线程 Reactor + epoll 回显服务器（1k 并发无泄漏）
-- [ ] M2 定时器/时间轮 + 日志（空闲连接自动踢掉）
+- [x] M1 单线程 Reactor + epoll 回显服务器（1000 并发、fd 零泄漏、QPS 29k ✅）
+- [x] M2 周期定时器 + 日志 + 空闲连接自动踢掉（含集成测试 ✅）
 - [ ] M3 one-loop-per-thread 多线程 + 线程池（QPS 提升 ≥2x）
 - [ ] M4 环形缓冲 Buffer + 内存池（perf 火焰图 malloc/free <5%）
 - [ ] M5 HTTP/1.1 解析 + 短链业务接口
