@@ -5,3 +5,14 @@ compile_commands.json
 *.log
 .vscode/
 .idea/
+
+# Python 测试产物（M7 的 pytest / locust 会生成）
+__pycache__/
+*.py[cod]
+.pytest_cache/
+allure-results/
+allure-report/
+
+__pycache__/
+*.pyc
+.pytest_cache/
