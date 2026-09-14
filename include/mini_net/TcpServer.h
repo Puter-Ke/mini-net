@@ -19,8 +19,12 @@ namespace mininet {
 // 每条连接绑定到一个 sub loop（one loop per thread），读写天然串行、几乎不需要锁。
 class TcpServer {
 public:
-    using MessageCallback = std::function<void(int conn_fd, const char* data, size_t len)>;
-    using ConnectionCallback = std::function<void(int conn_fd, bool connected)>;
+    // 回调同时给 fd 和"连接唯一 id"。为什么需要 id？
+    //   fd 会被内核复用：旧连接关闭后同一个 fd 马上可能分配给新连接，
+    //   按 fd 保存"每条连接的协议解析状态"就会出现跨连接串台（本项目实测偶发 404）。
+    //   id 单调递增、永不复用，因此协议层状态必须按 id 存。
+    using MessageCallback = std::function<void(int conn_fd, uint64_t conn_id, const char* data, size_t len)>;
+    using ConnectionCallback = std::function<void(int conn_fd, uint64_t conn_id, bool connected)>;
 
     TcpServer(EventLoop* loop, uint16_t port);
     ~TcpServer();
@@ -47,7 +51,8 @@ private:
     struct Conn;   // fd + Channel + 读缓冲 + 最后活跃时间 + 归属 loop
 
     void handleAccept();                                        // base loop
-    void addConnection(int cfd, EventLoop* io_loop, const char* ip, uint16_t peer_port);  // io loop
+    void addConnection(int cfd, uint64_t conn_id, EventLoop* io_loop, const char* ip,
+                       uint16_t peer_port);                                               // io loop
     void handleReadable(const std::shared_ptr<Conn>& conn);     // io loop
     void closeConn(const std::shared_ptr<Conn>& conn, const char* reason);                // 任意线程，内部派发
     void closeConnInLoop(const std::shared_ptr<Conn>& conn, const char* reason);          // 必须 io loop
@@ -70,6 +75,7 @@ private:
     MessageCallback on_message_;
     ConnectionCallback on_connection_;
     std::atomic<uint64_t> conn_count_{0};
+    std::atomic<uint64_t> next_conn_id_{1};   // 连接唯一 id（永不复用）
     std::atomic<uint64_t> recv_bytes_{0};
     std::atomic<uint64_t> closed_idle_{0};
     int idle_timeout_s_{30};

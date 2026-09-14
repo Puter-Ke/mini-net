@@ -10,43 +10,41 @@ HttpServer::HttpServer(EventLoop* loop, uint16_t port) : loop_(loop), port_(port
 
 HttpServer::~HttpServer() = default;
 
-HttpServer::HttpConn* HttpServer::findOrCreate(int fd) {
-    Shard& shard = shards_[static_cast<size_t>(fd) % kShards];
+HttpServer::HttpConn* HttpServer::findOrCreate(uint64_t conn_id) {
+    Shard& shard = shards_[shardOf(conn_id)];
     std::lock_guard<std::mutex> lk(shard.mtx);
-    auto& slot = shard.conns[fd];
+    auto& slot = shard.conns[conn_id];
     if (!slot) slot = std::make_shared<HttpConn>();
     return slot.get();
 }
 
-void HttpServer::drop(int fd) {
-    Shard& shard = shards_[static_cast<size_t>(fd) % kShards];
+void HttpServer::drop(uint64_t conn_id) {
+    Shard& shard = shards_[shardOf(conn_id)];
     std::lock_guard<std::mutex> lk(shard.mtx);
-    shard.conns.erase(fd);
+    shard.conns.erase(conn_id);
 }
 
 void HttpServer::start() {
     server_ = std::make_unique<TcpServer>(loop_, port_);
     server_->setThreadNum(thread_num_);
     server_->setIdleTimeoutSeconds(idle_timeout_s_);
-    server_->setMessageCallback([this](int fd, const char* data, size_t len) {
-        onMessage(fd, data, len);
+    server_->setMessageCallback([this](int fd, uint64_t conn_id, const char* data, size_t len) {
+        onMessage(fd, conn_id, data, len);
     });
-    server_->setConnectionCallback([this](int fd, bool connected) {
-        onConnection(fd, connected);
+    server_->setConnectionCallback([this](int fd, uint64_t conn_id, bool connected) {
+        onConnection(fd, conn_id, connected);
     });
     server_->start();
     LOG_INFO("HTTP 服务已就绪（端口 %u，IO 线程 %d，空闲超时 %d 秒）", port_, thread_num_,
              idle_timeout_s_);
 }
 
-void HttpServer::onConnection(int fd, bool connected) {
-    (void)connected;
-    // 无论新连接还是断开，都清掉这个 fd 的解析状态。
-    // 原因（实测踩到的真 bug）：内核会复用 fd。旧连接关闭后如果状态没清，
-    // 新连接复用同一个 fd 时，上一条连接的"半截请求"状态会让新数据被误解析，
-    // 表现为偶发 404（把请求体当成了新的请求行）。
-    // 新连接的 onConnection(fd, true) 一定发生在该 fd 任何数据回调之前，所以这里清是安全的。
-    drop(fd);
+void HttpServer::onConnection(int fd, uint64_t conn_id, bool connected) {
+    (void)fd;
+    // 连接建立时清一次（保证新连接从零状态开始），断开时释放内存。
+    // 注意这里是按 conn_id 清，而不是按 fd —— fd 会被复用，按 fd 清会误删新连接的状态
+    // （旧连接关闭的清理动作可能晚于新连接的状态创建，实测表现为偶发 404）。
+    drop(conn_id);
 }
 
 void HttpServer::handleError(int fd, const HttpParser::Error& err) {
@@ -59,8 +57,8 @@ void HttpServer::handleError(int fd, const HttpParser::Error& err) {
     server_->shutdown(fd);
 }
 
-void HttpServer::onMessage(int fd, const char* data, size_t len) {
-    HttpConn* conn = findOrCreate(fd);
+void HttpServer::onMessage(int fd, uint64_t conn_id, const char* data, size_t len) {
+    HttpConn* conn = findOrCreate(conn_id);
     conn->in.append(data, len);
 
     while (true) {

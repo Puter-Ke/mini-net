@@ -45,15 +45,17 @@ private:
 
     // 分片锁：fd 决定分片，不同 IO 线程通常落在不同分片，减少锁竞争
     static constexpr size_t kShards = 16;
+    // 分片锁：按连接 id 分片。**不要按 fd 分片**——fd 会被复用，会造成跨连接串台
     struct Shard {
         std::mutex mtx;
-        std::unordered_map<int, std::shared_ptr<HttpConn>> conns;
+        std::unordered_map<uint64_t, std::shared_ptr<HttpConn>> conns;
     };
 
-    HttpConn* findOrCreate(int fd);
-    void drop(int fd);
-    void onMessage(int fd, const char* data, size_t len);
-    void onConnection(int fd, bool connected);
+    HttpConn* findOrCreate(uint64_t conn_id);
+    void drop(uint64_t conn_id);
+    void onMessage(int fd, uint64_t conn_id, const char* data, size_t len);
+    void onConnection(int fd, uint64_t conn_id, bool connected);
+    static size_t shardOf(uint64_t conn_id) { return static_cast<size_t>(conn_id % kShards); }
     void handleError(int fd, const HttpParser::Error& err);
 
     EventLoop* loop_;

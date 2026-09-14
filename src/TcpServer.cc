@@ -28,9 +28,10 @@ int64_t nowMs() {
 // 每条连接的落地点。注意 last_active_ms 是原子的：
 // 它在 IO 线程写、在 base loop 的扫描线程读，用普通 int64_t 就是数据竞争（TSAN 会报）。
 struct TcpServer::Conn {
-    Conn(int conn_fd, EventLoop* owner)
-        : fd(conn_fd), owner_loop(owner), channel(conn_fd, owner), last_active_ms(nowMs()) {}
+    Conn(int conn_fd, uint64_t conn_id, EventLoop* owner)
+        : fd(conn_fd), id(conn_id), owner_loop(owner), channel(conn_fd, owner), last_active_ms(nowMs()) {}
     int fd;
+    const uint64_t id;
     EventLoop* owner_loop;
     Channel channel;
     Buffer in;
@@ -122,17 +123,19 @@ void TcpServer::handleAccept() {
         // 关键：连接对象必须在它自己的 IO 线程里创建（Channel 只属于那个 loop）
         EventLoop* io_loop = pool_->nextLoop();
         const std::string ip_str(ip);
-        io_loop->runInLoop([this, cfd, io_loop, ip_str, pport] {
-            addConnection(cfd, io_loop, ip_str.c_str(), pport);
+        const uint64_t conn_id = next_conn_id_.fetch_add(1);
+        io_loop->runInLoop([this, cfd, conn_id, io_loop, ip_str, pport] {
+            addConnection(cfd, conn_id, io_loop, ip_str.c_str(), pport);
         });
     }
 }
 
-void TcpServer::addConnection(int cfd, EventLoop* io_loop, const char* ip, uint16_t peer_port) {
+void TcpServer::addConnection(int cfd, uint64_t conn_id, EventLoop* io_loop, const char* ip,
+                              uint16_t peer_port) {
     // 用对象池分配 Conn：placement new 构造 + 自定义删除器回收
     // （不用 allocate_shared：shared_ptr 的控制块类型大小不可知，塞进定长池会越界）
     void* mem = conn_pool_->allocate();
-    auto* raw = new (mem) Conn(cfd, io_loop);
+    auto* raw = new (mem) Conn(cfd, conn_id, io_loop);
     std::shared_ptr<Conn> conn(raw, [this](Conn* c) {
         c->~Conn();
         conn_pool_->deallocate(c);
@@ -155,10 +158,10 @@ void TcpServer::addConnection(int cfd, EventLoop* io_loop, const char* ip, uint1
         conns_[cfd] = conn;
     }
     conn_count_.fetch_add(1);
-    LOG_INFO("新连接 fd=%d 来自 %s:%u（在线 %zu，累计 %llu，loop=%s）", cfd, ip, peer_port,
-             aliveConnections(), static_cast<unsigned long long>(conn_count_.load()),
-             io_loop->isInLoopThread() ? "本线程" : "其他线程");
-    if (on_connection_) on_connection_(cfd, true);
+    LOG_INFO("新连接 fd=%d id=%llu 来自 %s:%u（在线 %zu，累计 %llu）", cfd,
+             static_cast<unsigned long long>(conn_id), ip, peer_port, aliveConnections(),
+             static_cast<unsigned long long>(conn_count_.load()));
+    if (on_connection_) on_connection_(cfd, conn_id, true);
 }
 
 void TcpServer::handleReadable(const std::shared_ptr<Conn>& conn) {
@@ -170,7 +173,7 @@ void TcpServer::handleReadable(const std::shared_ptr<Conn>& conn) {
             conn->last_active_ms.store(nowMs(), std::memory_order_relaxed);
             conn->recv_bytes += static_cast<uint64_t>(n);
             recv_bytes_.fetch_add(static_cast<uint64_t>(n));
-            if (on_message_) on_message_(fd, conn->in.peek(), static_cast<size_t>(n));
+            if (on_message_) on_message_(fd, conn->id, conn->in.peek(), static_cast<size_t>(n));
             conn->in.retrieve(static_cast<size_t>(n));
             continue;   // ET：读到 EAGAIN 为止
         }
@@ -265,7 +268,7 @@ void TcpServer::closeConnInLoop(const std::shared_ptr<Conn>& conn, const char* r
     // 先通知应用层"连接没了"，再真正 close(fd)：
     // close 之后这个 fd 立刻可能被内核分配给新连接，如果应用层状态晚一步才清，
     // 就会出现"新连接读到旧状态"的竞态（本项目踩过：偶发 404）
-    if (on_connection_) on_connection_(fd, false);
+    if (on_connection_) on_connection_(fd, conn->id, false);
     ::close(fd);
     LOG_INFO("关闭连接 fd=%d（%s，在线 %zu）", fd, reason, aliveConnections());
 }

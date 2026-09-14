@@ -434,7 +434,11 @@ class TestRedirect:
         status, _headers, _body = parse_http_response(data)
         assert status in (400, 404), f"应该是 400 或 404，实际 {status}；响应={data[:300]!r}"
         body = assert_raw_error(data, status)
-        assert body["error"] in ("invalid_code", "not_found"), f"error 取值超出合理范围：{body!r}"
+        # bad_request 同样合理：`GET /ab cd HTTP/1.1` 的请求行本身就不合 HTTP 语法，
+        # 服务端在"解析请求行"阶段就拒绝（detail 说明原因），比解析出短码再判非法更早、更省资源。
+        assert body["error"] in ("invalid_code", "not_found", "bad_request"), (
+            f"error 取值超出合理范围：{body!r}"
+        )
 
     @pytest.mark.parametrize(
         "code",

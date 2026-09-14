@@ -20,7 +20,7 @@ TEST(TcpServerTest, ClosesIdleConnection) {
     EventLoop loop;
     TcpServer server(&loop, kPort);
     server.setIdleTimeoutSeconds(1);
-    server.setMessageCallback([](int, const char*, size_t) {});
+    server.setMessageCallback([](int, uint64_t, const char*, size_t) {});
     server.start();
 
     std::thread loop_thread([&] { loop.loop(); });

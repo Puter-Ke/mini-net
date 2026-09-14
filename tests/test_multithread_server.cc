@@ -54,7 +54,7 @@ TEST(TcpServerTest, MultithreadedEchoAcrossLoops) {
     TcpServer server(&loop, kPort);
     server.setThreadNum(4);
     server.setIdleTimeoutSeconds(0);   // 本测试不测超时
-    server.setMessageCallback([](int fd, const char* data, size_t len) {
+    server.setMessageCallback([](int fd, uint64_t /*conn_id*/, const char* data, size_t len) {
         ::send(fd, data, len, MSG_NOSIGNAL);
     });
     server.start();
