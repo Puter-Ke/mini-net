@@ -35,6 +35,7 @@ struct TcpServer::Conn {
     Channel channel;
     Buffer in;
     std::string out;                       // 写缓冲：非阻塞 send 只写一半时暂存
+    bool writing{false};                   // 是否正在关注 EPOLLOUT
     std::atomic<int64_t> last_active_ms;
     uint64_t recv_bytes{0};
 };
