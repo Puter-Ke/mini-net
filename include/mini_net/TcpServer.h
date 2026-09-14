@@ -10,6 +10,7 @@
 #include "mini_net/Channel.h"
 #include "mini_net/EventLoop.h"
 #include "mini_net/EventLoopThreadPool.h"
+#include "mini_net/MemoryPool.h"
 
 namespace mininet {
 
@@ -52,6 +53,7 @@ private:
     int listen_fd_{-1};
     std::unique_ptr<Channel> accept_channel_;
     std::unique_ptr<EventLoopThreadPool> pool_;
+    std::unique_ptr<MemoryPool> conn_pool_;   // Conn 对象池（必须在 conns_ 之前声明，保证析构顺序）
     int thread_num_{4};
 
     mutable std::mutex conns_mtx_;                              // 保护 conns_

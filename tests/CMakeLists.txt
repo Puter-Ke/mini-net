@@ -10,6 +10,7 @@ FetchContent_MakeAvailable(googletest)
 
 add_executable(mininet_tests
   test_buffer.cc
+  test_memory_pool.cc
   test_timer_wheel.cc
   test_event_loop.cc
   test_wakeup.cc

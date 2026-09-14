@@ -33,6 +33,7 @@ add_library(mininet STATIC
   src/ThreadPool.cc
   src/TcpServer.cc
   src/Buffer.cc
+  src/MemoryPool.cc
   src/TimerWheel.cc
 )
 target_include_directories(mininet PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

@@ -8,6 +8,7 @@
 
 #include <cerrno>
 #include <cstring>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -37,7 +38,10 @@ struct TcpServer::Conn {
     uint64_t recv_bytes{0};
 };
 
-TcpServer::TcpServer(EventLoop* loop, uint16_t port) : loop_(loop), port_(port) {}
+TcpServer::TcpServer(EventLoop* loop, uint16_t port) : loop_(loop), port_(port) {
+    // 块大小按 Conn 实际大小定，每 chunk 512 块（大连接量下减少 malloc 次数）
+    conn_pool_ = std::make_unique<MemoryPool>(sizeof(Conn), 512);
+}
 
 TcpServer::~TcpServer() {
     if (idle_timer_id_ >= 0) loop_->cancelTimer(idle_timer_id_);
@@ -123,7 +127,14 @@ void TcpServer::handleAccept() {
 }
 
 void TcpServer::addConnection(int cfd, EventLoop* io_loop, const char* ip, uint16_t peer_port) {
-    auto conn = std::make_shared<Conn>(cfd, io_loop);
+    // 用对象池分配 Conn：placement new 构造 + 自定义删除器回收
+    // （不用 allocate_shared：shared_ptr 的控制块类型大小不可知，塞进定长池会越界）
+    void* mem = conn_pool_->allocate();
+    auto* raw = new (mem) Conn(cfd, io_loop);
+    std::shared_ptr<Conn> conn(raw, [this](Conn* c) {
+        c->~Conn();
+        conn_pool_->deallocate(c);
+    });
     const std::weak_ptr<Conn> weak = conn;   // 用 weak_ptr 打破 "Conn → Channel → 回调 → Conn" 的循环引用
 
     conn->channel.setReadCallback([this, weak] {
