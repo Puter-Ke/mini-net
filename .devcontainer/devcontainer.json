@@ -1,6 +1,11 @@
 {
   "name": "mini-net (C++ 高并发网络服务)",
   "image": "mcr.microsoft.com/devcontainers/cpp:1-ubuntu-22.04",
+  "features": {
+    "ghcr.io/devcontainers/features/sshd:1": {
+      "version": "latest"
+    }
+  },
   "postCreateCommand": "sudo apt-get update && sudo apt-get install -y valgrind netcat-openbsd libgoogle-perftools-dev iproute2 && python3 -m pip install --user pytest requests",
   "customizations": {
     "vscode": {
