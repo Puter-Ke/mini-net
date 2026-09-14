@@ -1,5 +1,9 @@
 # mini-net — 从零手写的 C++ 高并发网络服务
 
+[![CI](https://github.com/Puter-Ke/mini-net/actions/workflows/ci.yml/badge.svg)](https://github.com/Puter-Ke/mini-net/actions/workflows/ci.yml)
+
+> 当前进度：**M1 完成并通过 1000 并发验证**（QPS 29k / fd 零泄漏 / ASAN 干净）
+
 > 目标：不依赖任何第三方网络框架，用 C++17 + epoll 实现一个支持 10k 并发连接的服务端，
 > 并配齐单测、CI、压测报告。这是给大厂 C++ 岗（华为 2012/ICT/海思 等）面试准备的主项目。
 
