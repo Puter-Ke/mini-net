@@ -20,7 +20,8 @@ jobs:
       - name: 安装依赖
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq cmake ninja-build g++ valgrind netcat-openbsd iproute2 python3-pip
+          sudo apt-get install -y -qq cmake ninja-build g++ valgrind netcat-openbsd iproute2 python3-pip python3-requests
+          python3 -m pip install --quiet --break-system-packages pytest requests locust 2>/dev/null || python3 -m pip install --quiet pytest requests locust
 
       - name: 执行脚本
         run: |
