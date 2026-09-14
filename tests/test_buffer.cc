@@ -52,15 +52,25 @@ TEST(BufferTest, GrowsWhenNeeded) {
 
 TEST(BufferTest, FindCrlfAndRetrieveUntil) {
     Buffer buf;
-    const std::string req = "GET /a HTTP/1.1\r\nHost: x\r\n\r\nBODY";
-    buf.append(req);
+    buf.append("GET /a HTTP/1.1\r\nHost: x\r\n\r\nBODY");
+
     const char* crlf = buf.findCRLF();
     ASSERT_NE(crlf, nullptr);
+    // findCRLF 返回 \r 的位置，前面就是请求行
     EXPECT_EQ(std::string(buf.peek(), static_cast<size_t>(crlf - buf.peek())), "GET /a HTTP/1.1");
-    buf.retrieveUntil(crlf);   // 连同 \r\n 一起取走
-    EXPECT_EQ(std::string(buf.peek(), buf.readableBytes()), "Host: x\r\n\r\nBODY");
-    ASSERT_NE(buf.findCRLF(), nullptr);   // 剩下的内容里还有 \r\n
-    EXPECT_EQ(std::string(buf.peek(), static_cast<size_t>(buf.findCRLF() - buf.peek())), "Host: x");
+
+    buf.retrieveUntil(crlf + 2);   // 语义：[peek, end)，所以要 +2 才能把 \r\n 一起带走
+    EXPECT_EQ(buf.retrieveAllAsString(), "Host: x\r\n\r\nBODY");
+}
+
+TEST(BufferTest, FindCrlfOnSplitInput) {
+    // 真实网络里 \r 和 \n 可能分两次到达：找不到时必须返回 nullptr，不能越界读
+    Buffer buf;
+    buf.append("GET /a HTTP/1.1\r", 15);
+    EXPECT_EQ(buf.findCRLF(), nullptr);
+    buf.append("\n", 1);
+    ASSERT_NE(buf.findCRLF(), nullptr);
+    EXPECT_EQ(std::string(buf.peek(), static_cast<size_t>(buf.findCRLF() - buf.peek())), "GET /a HTTP/1.1");
 }
 
 TEST(BufferTest, ReadFdReadsThroughPipe) {

@@ -27,7 +27,7 @@
 // 用法示例：
 //   ./echo_bench --host 127.0.0.1 --port 8080 --conns 1000 --requests 1000 --size 64
 //   ./echo_bench --mode http --path /healthz --conns 1000 --requests 1000
-//   ./echo_bench --mode http --method POST --path /api/shorten \
+//   ./echo_bench --mode http --method POST --path /api/shorten
 //                --body '{"url":"https://example.com/bench/%d"}' --conns 200
 //   ./echo_bench --mode http --path /healthz --duration 30 --conns 1000   # 定压 30 秒
 //   ./echo_bench --help

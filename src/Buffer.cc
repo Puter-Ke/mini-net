@@ -48,8 +48,10 @@ void Buffer::retrieveAll() {
 }
 
 void Buffer::retrieveUntil(const char* end) {
-    if (end < peek()) return;
-    retrieve(static_cast<size_t>(end - peek()) + 1);   // 连同分隔符一起取走
+    // 语义：取走 [peek(), end) 区间的数据，end 本身保留
+    // （HTTP 解析里通常传 findCRLF() 之后的位置，把 \r\n 也一起带走）
+    if (end <= peek()) return;
+    retrieve(static_cast<size_t>(end - peek()));
 }
 
 std::string Buffer::retrieveAsString(size_t n) {
