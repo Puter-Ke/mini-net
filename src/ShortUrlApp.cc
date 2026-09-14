@@ -152,9 +152,24 @@ void notFound(HttpResponse* resp) {
 
 }  // namespace
 
+namespace {
+// 把 \r \n 显式转义出来，避免日志里"看不见的字符"骗人
+std::string esc(const std::string& s) {
+    std::string out;
+    for (char c : s) {
+        if (c == '\r') out += "\\r";
+        else if (c == '\n') out += "\\n";
+        else out.push_back(c);
+    }
+    return out;
+}
+}  // namespace
+
 void ShortUrlApp::handle(const HttpRequest& req, HttpResponse* resp) {
     const std::string& path = req.path;
-    LOG_DEBUG("收到请求 %s %s (body=%zu 字节)", req.method.c_str(), req.target.c_str(), req.body.size());
+    LOG_DEBUG("解析结果: method=[%s](len=%zu) target=[%s](len=%zu) version=[%s](len=%zu) body=%zu",
+              esc(req.method).c_str(), req.method.size(), esc(req.target).c_str(), req.target.size(),
+              esc(req.version).c_str(), req.version.size(), req.body.size());
 
     if (path == "/healthz") {
         if (req.method != "GET") {
